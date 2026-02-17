@@ -1,8 +1,10 @@
 package bot
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -10,18 +12,29 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func checkNilErr(e error) {
-	if e != nil {
-		log.Fatal("Error message")
+type discordBot struct {
+	logger *slog.Logger
+}
+
+type Bot interface {
+	Run()
+}
+
+func NewBot(logger *slog.Logger) Bot {
+	return &discordBot{
+		logger: logger,
 	}
 }
 
-func Run() {
+func (b *discordBot) Run() {
 	botToken := os.Getenv("BOT_TOKEN")
 
 	// create a session
 	discord, err := discordgo.New("Bot " + botToken)
-	checkNilErr(err)
+	if err != nil {
+		b.logger.Error("failed to create a session", slog.String("ERROR", err.Error()))
+		os.Exit(-1)
+	}
 
 	// add a event handler
 	discord.AddHandler(newMessage)
@@ -41,12 +54,18 @@ func newMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	if !strings.HasPrefix(m.Content, "?") {
-		return
-	}
-
 	switch {
-	case strings.Contains(m.Content, "?hello"):
-		s.ChannelMessageSend(m.ChannelID, "tang ina mo kupal!")
+	case strings.Contains(m.Content, "?join"):
+		vs, err := s.State.VoiceState(m.GuildID, m.Author.ID)
+		if err != nil {
+			if errors.Is(discordgo.ErrStateNotFound, err) {
+				s.ChannelMessageSend(m.ChannelID, "Hoy bugok wala ka sa voice channel!")
+				return
+			}
+
+			log.Fatal("There was an err")
+		}
+
+		s.ChannelVoiceJoin(vs.GuildID, vs.ChannelID, true, true)
 	}
 }
