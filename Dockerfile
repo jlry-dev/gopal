@@ -2,8 +2,12 @@ FROM golang:1.25.7-alpine
 
 WORKDIR ./app
 
-RUN apk update
+COPY go.* ./
+
+RUN go mod download
 
 COPY . .
 
-CMD ["go","run","."]
+RUN go build -o ./bin/gopal
+
+CMD ["./bin/./gopal"]
