@@ -3,7 +3,6 @@ package bot
 import (
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -13,7 +12,8 @@ import (
 )
 
 type discordBot struct {
-	logger *slog.Logger
+	logger  *slog.Logger
+	handler *eventHandler
 }
 
 type Bot interface {
@@ -21,8 +21,13 @@ type Bot interface {
 }
 
 func NewBot(logger *slog.Logger) Bot {
-	return &discordBot{
+	newHandlr := &eventHandler{
 		logger: logger,
+	}
+
+	return &discordBot{
+		logger:  logger,
+		handler: newHandlr,
 	}
 }
 
@@ -41,7 +46,7 @@ func (b *discordBot) Run() {
 	}
 
 	// add a event handler
-	discord.AddHandler(newMessage)
+	discord.AddHandler(b.handler.botHandler)
 
 	// open session
 	discord.Open()
@@ -53,7 +58,11 @@ func (b *discordBot) Run() {
 	<-c
 }
 
-func newMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
+type eventHandler struct {
+	logger *slog.Logger
+}
+
+func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
@@ -67,7 +76,8 @@ func newMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 				return
 			}
 
-			log.Fatal("There was an err")
+			e.logger.Error("error retrieving voice state", slog.String("ERROR", err.Error()))
+			return
 		}
 
 		s.ChannelVoiceJoin(vs.GuildID, vs.ChannelID, true, true)
