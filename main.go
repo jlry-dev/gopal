@@ -10,9 +10,11 @@ import (
 )
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("failed to load env field")
+	if env := os.Getenv("APP_ENV"); env != "production" {
+		err := godotenv.Load()
+		if err != nil {
+			log.Fatalf("failed to load env: %v", err)
+		}
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))

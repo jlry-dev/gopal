@@ -27,7 +27,11 @@ func NewBot(logger *slog.Logger) Bot {
 }
 
 func (b *discordBot) Run() {
-	botToken := os.Getenv("BOT_TOKEN")
+	botToken, isPresent := os.LookupEnv("BOT_TOKEN")
+	if !isPresent {
+		b.logger.Error("missing BOT_TOKEN env variable")
+		os.Exit(-1)
+	}
 
 	// create a session
 	discord, err := discordgo.New("Bot " + botToken)
