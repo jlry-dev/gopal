@@ -1,14 +1,18 @@
 package bot
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log"
 	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	"google.golang.org/api/option"
+	"google.golang.org/api/youtube/v3"
 )
 
 type discordBot struct {
@@ -68,7 +72,7 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 	}
 
 	switch {
-	case strings.Contains(m.Content, "?join"):
+	case strings.HasPrefix(m.Content, "?join"):
 		vs, err := s.State.VoiceState(m.GuildID, m.Author.ID)
 		if err != nil {
 			if errors.Is(discordgo.ErrStateNotFound, err) {
@@ -80,6 +84,67 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 			return
 		}
 
-		s.ChannelVoiceJoin(vs.GuildID, vs.ChannelID, true, true)
+		_, err = s.ChannelVoiceJoin(vs.GuildID, vs.ChannelID, true, true)
+		if err != nil {
+			e.logger.Error("error connecting to voice channel", slog.String("ERROR", err.Error()))
+			return
+		}
+	case strings.HasPrefix(m.Content, "?play"):
+		gs, err := s.State.Guild(m.GuildID)
+		if err != nil {
+			e.logger.Error("error getting guild state", slog.String("ERROR", err.Error()))
+			return
+		}
+
+		var isJoined bool
+		// Check if naa sa voice call ang bot
+		for _, vs := range gs.VoiceStates {
+			if vs.UserID == s.State.User.ID {
+				isJoined = true
+			}
+		}
+
+		if !isJoined {
+			s.ChannelMessageSend(m.ChannelID, "GoPal is not in a voice channel")
+			return
+		}
+
+		// Parse the song title
+		title := strings.Join(strings.Fields(m.Content)[1:], " ")
+
+		url := findMusicURL(title)
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("URL:%v", url))
+
+		// download
+		// stream
 	}
+}
+
+func findMusicURL(title string) (url string) {
+	devKey, isPresent := os.LookupEnv("GOOGLE_DEV_KEY")
+	if !isPresent {
+		log.Fatal("missing GOOGLE_DEV_KEY env variable")
+	}
+
+	service, err := youtube.NewService(context.TODO(), option.WithAPIKey(devKey))
+	if err != nil {
+		// TODO : Make this not fatal
+		log.Fatalf("Error creating new YouTube client: %v", err)
+	}
+
+	// Make the API call to YouTube.
+	call := service.Search.List([]string{"id"}).
+		Q("music" + title).
+		Type("video").
+		VideoCategoryId("10"). // 10 = Music para sa category
+		MaxResults(1)
+
+	response, err := call.Do()
+	if err != nil {
+		// TODO : Make this not fatal
+		log.Fatalf("failed to search: %v", err)
+	}
+
+	item := response.Items[0]
+	return fmt.Sprintf("https://www.youtube.com/watch?v=%v", item.Id.VideoId)
 }
