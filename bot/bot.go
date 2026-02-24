@@ -7,10 +7,12 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/google/uuid"
 	"google.golang.org/api/option"
 	"google.golang.org/api/youtube/v3"
 )
@@ -116,6 +118,25 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("URL:%v", url))
 
 		// download
+		wd, isPresent := os.LookupEnv("WORKING_DIR")
+		if !isPresent {
+			e.logger.Error("missing BOT_TOKEN env variable")
+			os.Exit(-1)
+		}
+
+		uid := uuid.New()
+
+		cmd := exec.Command("yt-dlp",
+			"-x",
+			"--audio-format", "mp3",
+			"-o", fmt.Sprintf("%s/downloads/%s.%%(ext)s", wd, uid),
+			url,
+		)
+		if err := cmd.Run(); err != nil {
+			e.logger.Error("error trying to download audio", slog.String("ERROR", err.Error()))
+			return
+		}
+
 		// stream
 	}
 }
