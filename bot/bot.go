@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
@@ -10,9 +11,10 @@ import (
 	"os/exec"
 	"os/signal"
 	"strings"
+	"sync"
 
+	"github.com/bwmarrin/dgvoice"
 	"github.com/bwmarrin/discordgo"
-	"github.com/google/uuid"
 	"google.golang.org/api/option"
 	"google.golang.org/api/youtube/v3"
 )
@@ -29,6 +31,7 @@ type Bot interface {
 func NewBot(logger *slog.Logger) Bot {
 	newHandlr := &eventHandler{
 		logger: logger,
+		guilds: map[string]*discordgo.VoiceConnection{},
 	}
 
 	return &discordBot{
@@ -65,7 +68,9 @@ func (b *discordBot) Run() {
 }
 
 type eventHandler struct {
-	logger *slog.Logger
+	logger    *slog.Logger
+	guilds    map[string]*discordgo.VoiceConnection
+	guildLock sync.Mutex
 }
 
 func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -86,11 +91,16 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 			return
 		}
 
-		_, err = s.ChannelVoiceJoin(vs.GuildID, vs.ChannelID, true, true)
+		vc, err := s.ChannelVoiceJoin(vs.GuildID, vs.ChannelID, true, true)
 		if err != nil {
 			e.logger.Error("error connecting to voice channel", slog.String("ERROR", err.Error()))
 			return
 		}
+
+		e.guildLock.Lock()
+		e.guilds[m.GuildID] = vc
+		e.guildLock.Unlock()
+
 	case strings.HasPrefix(m.Content, "?play"):
 		gs, err := s.State.Guild(m.GuildID)
 		if err != nil {
@@ -117,27 +127,59 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 		url := findMusicURL(title)
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("URL:%v", url))
 
+		e.guildLock.Lock()
+		vc := e.guilds[m.GuildID]
+		e.guildLock.Unlock()
+
 		// download
-		wd, isPresent := os.LookupEnv("WORKING_DIR")
-		if !isPresent {
-			e.logger.Error("missing BOT_TOKEN env variable")
-			os.Exit(-1)
-		}
-
-		uid := uuid.New()
-
-		cmd := exec.Command("yt-dlp",
+		yt_dlp := exec.Command("yt-dlp",
 			"-x",
 			"--audio-format", "mp3",
-			"-o", fmt.Sprintf("%s/downloads/%s.%%(ext)s", wd, uid),
 			url,
+			"-o-",
 		)
-		if err := cmd.Run(); err != nil {
-			e.logger.Error("error trying to download audio", slog.String("ERROR", err.Error()))
-			return
-		}
+		ytdlpOut, _ := yt_dlp.StdoutPipe()
+
+		ffmpeg := exec.Command("ffmpeg", "-i", "pipe:0", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1")
+
+		ffmpeg.Stdin = ytdlpOut
+		ffmpegOut, _ := ffmpeg.StdoutPipe()
+
+		pcmChan := make(chan []int16, 2)
+		go dgvoice.SendPCM(vc, pcmChan)
+		defer close(pcmChan)
 
 		// stream
+		go func() {
+			defer ytdlpOut.Close()
+			yt_dlp.Run()
+		}()
+
+		vc.Speaking(true)
+		defer vc.Speaking(false)
+
+		done := false
+		go func() {
+			defer ffmpegOut.Close()
+			err = ffmpeg.Run()
+			if err != nil {
+				e.logger.Error("error trying to stream using ffmpeg", slog.String("ERROR", err.Error()))
+				return
+			}
+
+			done = true
+		}()
+
+		for {
+			audioBuffer := make([]int16, 960*2)
+			binary.Read(ffmpegOut, binary.LittleEndian, &audioBuffer)
+			if done {
+				break
+			}
+
+			pcmChan <- audioBuffer
+		}
+
 	}
 }
 
