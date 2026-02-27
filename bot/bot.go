@@ -31,7 +31,9 @@ type Bot interface {
 func NewBot(logger *slog.Logger) Bot {
 	newHandlr := &eventHandler{
 		logger: logger,
-		guilds: map[string]*discordgo.VoiceConnection{},
+		connections: &voiceConnections{
+			connections: make(map[string]*discordgo.VoiceConnection),
+		},
 	}
 
 	return &discordBot{
@@ -68,9 +70,37 @@ func (b *discordBot) Run() {
 }
 
 type eventHandler struct {
-	logger    *slog.Logger
-	guilds    map[string]*discordgo.VoiceConnection
-	guildLock sync.Mutex
+	logger      *slog.Logger
+	connections *voiceConnections
+}
+
+type voiceConnections struct {
+	connections map[string]*discordgo.VoiceConnection
+	vcLock      sync.RWMutex
+}
+
+func (vc *voiceConnections) AddConnection(guildID string, connection *discordgo.VoiceConnection) {
+	vc.vcLock.Lock()
+	vc.connections[guildID] = connection
+	vc.vcLock.Unlock()
+}
+
+func (vc *voiceConnections) Disconnect(guildID string) {
+	vc.vcLock.Lock()
+	delete(vc.connections, guildID)
+	vc.vcLock.Unlock()
+}
+
+func (vc *voiceConnections) GetConnection(guildID string) *discordgo.VoiceConnection {
+	vc.vcLock.RLock()
+	c, ok := vc.connections[guildID]
+	vc.vcLock.RUnlock()
+
+	if !ok {
+		return nil
+	}
+
+	return c
 }
 
 func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -97,9 +127,7 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 			return
 		}
 
-		e.guildLock.Lock()
-		e.guilds[m.GuildID] = vc
-		e.guildLock.Unlock()
+		e.connections.AddConnection(m.GuildID, vc)
 
 	case strings.HasPrefix(m.Content, "?play"):
 		gs, err := s.State.Guild(m.GuildID)
@@ -127,9 +155,7 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 		url := findMusicURL(title)
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("URL:%v", url))
 
-		e.guildLock.Lock()
-		vc := e.guilds[m.GuildID]
-		e.guildLock.Unlock()
+		vc := e.connections.GetConnection(m.GuildID)
 
 		// download
 		yt_dlp := exec.Command("yt-dlp",
