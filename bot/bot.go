@@ -109,44 +109,28 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 	}
 
 	switch {
-	case strings.HasPrefix(m.Content, "?join"):
-		vs, err := s.State.VoiceState(m.GuildID, m.Author.ID)
-		if err != nil {
-			if errors.Is(discordgo.ErrStateNotFound, err) {
-				s.ChannelMessageSend(m.ChannelID, "Hoy bugok wala ka sa voice channel!")
+	case strings.HasPrefix(m.Content, "?play"):
+
+		vc := e.connections.GetConnection(m.GuildID)
+		if vc == nil {
+			vs, err := s.State.VoiceState(m.GuildID, m.Author.ID)
+			if err != nil {
+				if errors.Is(discordgo.ErrStateNotFound, err) {
+					s.ChannelMessageSend(m.ChannelID, "Hoy bugok wala ka sa voice channel!")
+					return
+				}
+
+				e.logger.Error("error retrieving voice state", slog.String("ERROR", err.Error()))
 				return
 			}
 
-			e.logger.Error("error retrieving voice state", slog.String("ERROR", err.Error()))
-			return
-		}
-
-		vc, err := s.ChannelVoiceJoin(vs.GuildID, vs.ChannelID, true, true)
-		if err != nil {
-			e.logger.Error("error connecting to voice channel", slog.String("ERROR", err.Error()))
-			return
-		}
-
-		e.connections.AddConnection(m.GuildID, vc)
-
-	case strings.HasPrefix(m.Content, "?play"):
-		gs, err := s.State.Guild(m.GuildID)
-		if err != nil {
-			e.logger.Error("error getting guild state", slog.String("ERROR", err.Error()))
-			return
-		}
-
-		var isJoined bool
-		// Check if naa sa voice call ang bot
-		for _, vs := range gs.VoiceStates {
-			if vs.UserID == s.State.User.ID {
-				isJoined = true
+			vc, err = s.ChannelVoiceJoin(vs.GuildID, vs.ChannelID, true, true)
+			if err != nil {
+				e.logger.Error("error connecting to voice channel", slog.String("ERROR", err.Error()))
+				return
 			}
-		}
 
-		if !isJoined {
-			s.ChannelMessageSend(m.ChannelID, "GoPal is not in a voice channel")
-			return
+			e.connections.AddConnection(m.GuildID, vc)
 		}
 
 		// Parse the song title
@@ -154,8 +138,6 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 
 		url := findMusicURL(title)
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("URL:%v", url))
-
-		vc := e.connections.GetConnection(m.GuildID)
 
 		// download
 		yt_dlp := exec.Command("yt-dlp",
@@ -185,9 +167,10 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 		defer vc.Speaking(false)
 
 		done := false
+
 		go func() {
 			defer ffmpegOut.Close()
-			err = ffmpeg.Run()
+			err := ffmpeg.Run()
 			if err != nil {
 				e.logger.Error("error trying to stream using ffmpeg", slog.String("ERROR", err.Error()))
 				return
@@ -205,7 +188,6 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 
 			pcmChan <- audioBuffer
 		}
-
 	}
 }
 
