@@ -211,7 +211,7 @@ func findMusicURL(title string) (url string, err error) {
 
 	// Make the API call to YouTube.
 	call := service.Search.List([]string{"id"}).
-		Q("music" + title).
+		Q(title).
 		Type("video").
 		VideoCategoryId("10"). // 10 = Music para sa category
 		MaxResults(1)
