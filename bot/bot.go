@@ -114,18 +114,22 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 	switch {
 	case strings.HasPrefix(m.Content, "?play"):
 		vc := e.connections.GetConnection(m.GuildID)
-		if vc == nil {
-			vs, err := s.State.VoiceState(m.GuildID, m.Author.ID)
-			if err != nil {
-				if errors.Is(discordgo.ErrStateNotFound, err) {
-					s.ChannelMessageSend(m.ChannelID, "Hoy bugok wala ka sa voice channel!")
-					return
-				}
 
-				e.logger.Error("error retrieving voice state", slog.String("ERROR", err.Error()))
+		// If naka join na nag bot pero ang user wala
+		// Dapat dili maka request ang user
+		vs, err := s.State.VoiceState(m.GuildID, m.Author.ID)
+		if err != nil {
+			if errors.Is(discordgo.ErrStateNotFound, err) {
+				s.ChannelMessageSend(m.ChannelID, "Hoy bugok wala ka sa voice channel!")
 				return
 			}
 
+			e.logger.Error("error retrieving voice state", slog.String("ERROR", err.Error()))
+			return
+		}
+
+		// Check if naka join na ang bot
+		if vc == nil {
 			vc, err = s.ChannelVoiceJoin(vs.GuildID, vs.ChannelID, true, true)
 			if err != nil {
 				e.logger.Error("error connecting to voice channel", slog.String("ERROR", err.Error()))
@@ -133,6 +137,15 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 			}
 
 			e.connections.AddConnection(m.GuildID, vc)
+		} else {
+			userVoiceChannel := vs.ChannelID
+			botVoiceChannel := vc.ChannelID
+
+			// Compare if they are on the same voice channel
+			if userVoiceChannel != botVoiceChannel {
+				s.ChannelMessageSend(m.ChannelID, "You are not on the same voice channel with GoPal.")
+				return
+			}
 		}
 
 		// Parse the song title
