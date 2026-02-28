@@ -136,7 +136,11 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 		// Parse the song title
 		title := strings.Join(strings.Fields(m.Content)[1:], " ")
 
-		url := findMusicURL(title)
+		url, err := findMusicURL(title)
+		if err != nil {
+			e.logger.Error(err.Error())
+		}
+
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("URL:%v", url))
 
 		// download
@@ -191,7 +195,7 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 	}
 }
 
-func findMusicURL(title string) (url string) {
+func findMusicURL(title string) (url string, err error) {
 	devKey, isPresent := os.LookupEnv("GOOGLE_DEV_KEY")
 	if !isPresent {
 		log.Fatal("missing GOOGLE_DEV_KEY env variable")
@@ -199,8 +203,7 @@ func findMusicURL(title string) (url string) {
 
 	service, err := youtube.NewService(context.TODO(), option.WithAPIKey(devKey))
 	if err != nil {
-		// TODO : Make this not fatal
-		log.Fatalf("Error creating new YouTube client: %v", err)
+		return "", fmt.Errorf("findMusicURL: failed to create new youtube service: %w", err)
 	}
 
 	// Make the API call to YouTube.
@@ -212,10 +215,9 @@ func findMusicURL(title string) (url string) {
 
 	response, err := call.Do()
 	if err != nil {
-		// TODO : Make this not fatal
-		log.Fatalf("failed to search: %v", err)
+		return "", fmt.Errorf("findMusicURL: failed to find youtube title: %w", err)
 	}
 
 	item := response.Items[0]
-	return fmt.Sprintf("https://www.youtube.com/watch?v=%v", item.Id.VideoId)
+	return fmt.Sprintf("https://www.youtube.com/watch?v=%v", item.Id.VideoId), nil
 }
