@@ -72,11 +72,6 @@ func (b *discordBot) Run() {
 	<-c
 }
 
-type eventHandler struct {
-	logger      *slog.Logger
-	connections *voiceConnections
-}
-
 type voiceConnections struct {
 	connections map[string]*discordgo.VoiceConnection
 	vcLock      sync.RWMutex
@@ -104,6 +99,11 @@ func (vc *voiceConnections) GetConnection(guildID string) *discordgo.VoiceConnec
 	}
 
 	return c
+}
+
+type eventHandler struct {
+	logger      *slog.Logger
+	connections *voiceConnections
 }
 
 func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
