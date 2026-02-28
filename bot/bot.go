@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bwmarrin/dgvoice"
 	"github.com/bwmarrin/discordgo"
@@ -179,8 +180,11 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 		go dgvoice.SendPCM(vc, pcmChan)
 		defer close(pcmChan)
 
-		audioBuffer := make([]int16, 960*2)
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+
 		for {
+			audioBuffer := make([]int16, 960*2)
 			err := binary.Read(ffmpegOut, binary.LittleEndian, &audioBuffer)
 			if err != nil {
 				if errors.Is(io.EOF, err) || errors.Is(io.ErrUnexpectedEOF, err) {
@@ -191,6 +195,8 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 				return
 			}
 
+			// Conform with discords fram per 20ms
+			<-ticker.C
 			pcmChan <- audioBuffer
 		}
 
