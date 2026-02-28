@@ -19,6 +19,8 @@ import (
 	"google.golang.org/api/youtube/v3"
 )
 
+var ERR_MUSIC_NOT_FOUND = errors.New("music not found")
+
 type discordBot struct {
 	logger  *slog.Logger
 	handler *eventHandler
@@ -110,7 +112,6 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 
 	switch {
 	case strings.HasPrefix(m.Content, "?play"):
-
 		vc := e.connections.GetConnection(m.GuildID)
 		if vc == nil {
 			vs, err := s.State.VoiceState(m.GuildID, m.Author.ID)
@@ -138,7 +139,13 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 
 		url, err := findMusicURL(title)
 		if err != nil {
-			e.logger.Error(err.Error())
+			if errors.Is(ERR_MUSIC_NOT_FOUND, err) {
+				s.ChannelMessageSend(m.ChannelID, "We can't find that music sorry :<")
+				return
+			}
+
+			e.logger.Error("error trying to find music URL", slog.String("ERROR", err.Error()))
+			return
 		}
 
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("URL:%v", url))
@@ -216,6 +223,10 @@ func findMusicURL(title string) (url string, err error) {
 	response, err := call.Do()
 	if err != nil {
 		return "", fmt.Errorf("findMusicURL: failed to find youtube title: %w", err)
+	}
+
+	if len(response.Items) < 1 {
+		return "", ERR_MUSIC_NOT_FOUND
 	}
 
 	item := response.Items[0]
