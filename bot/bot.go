@@ -13,7 +13,6 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/bwmarrin/dgvoice"
 	"github.com/bwmarrin/discordgo"
@@ -156,7 +155,7 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 		yt_dlp := exec.Command("yt-dlp", "-x", url, "-o-")
 		ytdlpOut, _ := yt_dlp.StdoutPipe()
 
-		ffmpeg := exec.Command("ffmpeg", "-i", "pipe:0", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1")
+		ffmpeg := exec.Command("ffmpeg", "-re", "-i", "pipe:0", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1")
 		ffmpeg.Stdin = ytdlpOut
 		ffmpegOut, _ := ffmpeg.StdoutPipe()
 
@@ -176,12 +175,9 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 		vc.Speaking(true)
 		defer vc.Speaking(false)
 
-		pcmChan := make(chan []int16, 3)
+		pcmChan := make(chan []int16, 100)
 		go dgvoice.SendPCM(vc, pcmChan)
 		defer close(pcmChan)
-
-		ticker := time.NewTicker(20 * time.Millisecond)
-		defer ticker.Stop()
 
 		for {
 			audioBuffer := make([]int16, 960*2)
@@ -195,8 +191,6 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 				return
 			}
 
-			// Conform with discords fram per 20ms
-			<-ticker.C
 			pcmChan <- audioBuffer
 		}
 
