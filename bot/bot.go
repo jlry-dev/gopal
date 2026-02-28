@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"os"
@@ -151,54 +152,49 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("URL:%v", url))
 
 		// download
-		yt_dlp := exec.Command("yt-dlp",
-			"-x",
-			"--audio-format", "mp3",
-			url,
-			"-o-",
-		)
+		yt_dlp := exec.Command("yt-dlp", "-x", url, "-o-")
 		ytdlpOut, _ := yt_dlp.StdoutPipe()
 
 		ffmpeg := exec.Command("ffmpeg", "-i", "pipe:0", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1")
-
 		ffmpeg.Stdin = ytdlpOut
 		ffmpegOut, _ := ffmpeg.StdoutPipe()
 
-		pcmChan := make(chan []int16, 2)
-		go dgvoice.SendPCM(vc, pcmChan)
-		defer close(pcmChan)
-
 		// stream
-		go func() {
-			defer ytdlpOut.Close()
-			yt_dlp.Run()
-		}()
+		if err := yt_dlp.Start(); err != nil {
+			e.logger.Error("error trying to download using yt-dlp", slog.String("ERROR", err.Error()))
+			return
+		}
+		defer yt_dlp.Process.Kill()
+
+		if err := ffmpeg.Start(); err != nil {
+			e.logger.Error("error trying to stream using ffmpeg", slog.String("ERROR", err.Error()))
+			return
+		}
+		defer ffmpeg.Process.Kill()
 
 		vc.Speaking(true)
 		defer vc.Speaking(false)
 
-		done := false
+		pcmChan := make(chan []int16, 3)
+		go dgvoice.SendPCM(vc, pcmChan)
+		defer close(pcmChan)
 
-		go func() {
-			defer ffmpegOut.Close()
-			err := ffmpeg.Run()
-			if err != nil {
-				e.logger.Error("error trying to stream using ffmpeg", slog.String("ERROR", err.Error()))
-				return
-			}
-
-			done = true
-		}()
-
+		audioBuffer := make([]int16, 960*2)
 		for {
-			audioBuffer := make([]int16, 960*2)
-			binary.Read(ffmpegOut, binary.LittleEndian, &audioBuffer)
-			if done {
-				break
+			err := binary.Read(ffmpegOut, binary.LittleEndian, &audioBuffer)
+			if err != nil {
+				if errors.Is(io.EOF, err) || errors.Is(io.ErrUnexpectedEOF, err) {
+					break
+				}
+
+				e.logger.Error("error during streaming:", slog.String("ERROR", err.Error()))
+				return
 			}
 
 			pcmChan <- audioBuffer
 		}
+
+		s.ChannelMessageSend(m.GuildID, "Finished playing song")
 	}
 }
 
