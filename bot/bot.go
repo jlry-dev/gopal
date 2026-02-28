@@ -34,8 +34,8 @@ type Bot interface {
 func NewBot(logger *slog.Logger) Bot {
 	newHandlr := &eventHandler{
 		logger: logger,
-		connections: &voiceConnections{
-			connections: make(map[string]*discordgo.VoiceConnection),
+		connections: &guildConnections{
+			guilds: make(map[string]*guild),
 		},
 	}
 
@@ -72,38 +72,97 @@ func (b *discordBot) Run() {
 	<-c
 }
 
-type voiceConnections struct {
-	connections map[string]*discordgo.VoiceConnection
-	vcLock      sync.RWMutex
+type guild struct {
+	guildID         string
+	voiceConnection *discordgo.VoiceConnection
 }
 
-func (vc *voiceConnections) AddConnection(guildID string, connection *discordgo.VoiceConnection) {
-	vc.vcLock.Lock()
-	vc.connections[guildID] = connection
-	vc.vcLock.Unlock()
+func NewGuild(guildID string, vc *discordgo.VoiceConnection) *guild {
+	return &guild{
+		guildID:         guildID,
+		voiceConnection: vc,
+	}
 }
 
-func (vc *voiceConnections) Disconnect(guildID string) {
-	vc.vcLock.Lock()
-	delete(vc.connections, guildID)
-	vc.vcLock.Unlock()
+func (g *guild) Stream(url string) error {
+	vc := g.voiceConnection
+
+	// download
+	yt_dlp := exec.Command("yt-dlp", "-x", url, "-o-")
+	ytdlpOut, _ := yt_dlp.StdoutPipe()
+
+	ffmpeg := exec.Command("ffmpeg", "-re", "-i", "pipe:0", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1")
+	ffmpeg.Stdin = ytdlpOut
+	ffmpegOut, _ := ffmpeg.StdoutPipe()
+
+	// stream
+	if err := yt_dlp.Start(); err != nil {
+		return fmt.Errorf("error streaming: failed to start yt-dlp process: %w", err)
+	}
+	defer yt_dlp.Process.Kill()
+
+	if err := ffmpeg.Start(); err != nil {
+		return fmt.Errorf("error streaming: failed to start ffmpeg process : %w", err)
+	}
+	defer ffmpeg.Process.Kill()
+
+	vc.Speaking(true)
+	defer vc.Speaking(false)
+
+	pcmChan := make(chan []int16, 100)
+	go dgvoice.SendPCM(vc, pcmChan)
+	defer close(pcmChan)
+
+	for {
+		audioBuffer := make([]int16, 960*2)
+		err := binary.Read(ffmpegOut, binary.LittleEndian, &audioBuffer)
+		if err != nil {
+			if errors.Is(io.EOF, err) || errors.Is(io.ErrUnexpectedEOF, err) {
+				break
+			}
+
+			return fmt.Errorf("error streaming: something went wrong during streaming: %w", err)
+		}
+
+		pcmChan <- audioBuffer
+	}
+
+	return nil
 }
 
-func (vc *voiceConnections) GetConnection(guildID string) *discordgo.VoiceConnection {
-	vc.vcLock.RLock()
-	c, ok := vc.connections[guildID]
-	vc.vcLock.RUnlock()
+// Tracks guilds the bot is connected
+type guildConnections struct {
+	guilds map[string]*guild
+	gLock  sync.RWMutex
+}
+
+func (gc *guildConnections) AddGuild(guildID string, g *guild) {
+	gc.gLock.Lock()
+	gc.guilds[guildID] = g
+	gc.gLock.Unlock()
+}
+
+func (gc *guildConnections) Disconnect(guildID string) {
+	gc.gLock.Lock()
+	delete(gc.guilds, guildID)
+	gc.gLock.Unlock()
+}
+
+func (gc *guildConnections) GetGuild(guildID string) *guild {
+	gc.gLock.RLock()
+	g, ok := gc.guilds[guildID]
+	gc.gLock.RUnlock()
 
 	if !ok {
 		return nil
 	}
 
-	return c
+	return g
 }
 
 type eventHandler struct {
 	logger      *slog.Logger
-	connections *voiceConnections
+	connections *guildConnections
 }
 
 func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -113,7 +172,7 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 
 	switch {
 	case strings.HasPrefix(m.Content, "?play"):
-		vc := e.connections.GetConnection(m.GuildID)
+		g := e.connections.GetGuild(m.GuildID)
 
 		// If naka join na nag bot pero ang user wala
 		// Dapat dili maka request ang user
@@ -129,17 +188,21 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 		}
 
 		// Check if naka join na ang bot
-		if vc == nil {
-			vc, err = s.ChannelVoiceJoin(vs.GuildID, vs.ChannelID, true, true)
+		if g == nil {
+			vc, err := s.ChannelVoiceJoin(vs.GuildID, vs.ChannelID, true, true)
 			if err != nil {
 				e.logger.Error("error connecting to voice channel", slog.String("ERROR", err.Error()))
 				return
 			}
 
-			e.connections.AddConnection(m.GuildID, vc)
+			newGuild := NewGuild(vs.GuildID, vc)
+			e.connections.AddGuild(m.GuildID, newGuild)
+
+			// Since g(*guild) is nil we assign the newly created guild struct sa iya
+			g = newGuild
 		} else {
 			userVoiceChannel := vs.ChannelID
-			botVoiceChannel := vc.ChannelID
+			botVoiceChannel := g.voiceConnection.ChannelID
 
 			// Compare if they are on the same voice channel
 			if userVoiceChannel != botVoiceChannel {
@@ -164,47 +227,8 @@ func (e *eventHandler) botHandler(s *discordgo.Session, m *discordgo.MessageCrea
 
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("URL:%v", url))
 
-		// download
-		yt_dlp := exec.Command("yt-dlp", "-x", url, "-o-")
-		ytdlpOut, _ := yt_dlp.StdoutPipe()
-
-		ffmpeg := exec.Command("ffmpeg", "-re", "-i", "pipe:0", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1")
-		ffmpeg.Stdin = ytdlpOut
-		ffmpegOut, _ := ffmpeg.StdoutPipe()
-
-		// stream
-		if err := yt_dlp.Start(); err != nil {
-			e.logger.Error("error trying to download using yt-dlp", slog.String("ERROR", err.Error()))
-			return
-		}
-		defer yt_dlp.Process.Kill()
-
-		if err := ffmpeg.Start(); err != nil {
-			e.logger.Error("error trying to stream using ffmpeg", slog.String("ERROR", err.Error()))
-			return
-		}
-		defer ffmpeg.Process.Kill()
-
-		vc.Speaking(true)
-		defer vc.Speaking(false)
-
-		pcmChan := make(chan []int16, 100)
-		go dgvoice.SendPCM(vc, pcmChan)
-		defer close(pcmChan)
-
-		for {
-			audioBuffer := make([]int16, 960*2)
-			err := binary.Read(ffmpegOut, binary.LittleEndian, &audioBuffer)
-			if err != nil {
-				if errors.Is(io.EOF, err) || errors.Is(io.ErrUnexpectedEOF, err) {
-					break
-				}
-
-				e.logger.Error("error during streaming:", slog.String("ERROR", err.Error()))
-				return
-			}
-
-			pcmChan <- audioBuffer
+		if err := g.Stream(url); err != nil {
+			e.logger.Error(err.Error())
 		}
 
 		s.ChannelMessageSend(m.GuildID, "Finished playing song")
