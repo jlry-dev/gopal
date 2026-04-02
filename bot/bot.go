@@ -2,7 +2,6 @@ package bot
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -76,19 +75,26 @@ func (b *gopal) Run() {
 
 func handler(m *events.MessageCreate) {
 	bot := m.Client()
-	user := m.Message.Member.User
+	user := m.Message.Author
 
+	message := m.Message
 	// Return when bot is the same
 	if bot.ID() == user.ID {
 		return
 	}
 
-	fmt.Println(m.Message.Content)
+	if !strings.HasPrefix(message.Content, "?") {
+		return
+	}
 
 	switch {
-	case strings.HasPrefix(m.Message.Content, "?play"):
-		bot.Rest.CreateMessage(m.ChannelID, discord.MessageCreate{
-			Content: "Place holder response.",
-		})
+	case strings.HasPrefix(message.Content, "?play"):
+		_, userIsJoined := bot.Caches.VoiceState(*message.GuildID, user.ID)
+
+		if !userIsJoined {
+			bot.Rest.CreateMessage(m.ChannelID, discord.MessageCreate{
+				Content: "User is not in a voice channel.",
+			})
+		}
 	}
 }
