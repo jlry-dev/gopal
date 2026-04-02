@@ -11,6 +11,7 @@ import (
 
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
@@ -42,11 +43,19 @@ func (b *gopal) Run() {
 	client, err := disgo.New(botToken,
 		bot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentMessageContent,
+			gateway.IntentGuilds,
 			gateway.IntentGuildMessages,
 			gateway.IntentGuildVoiceStates,
 		)),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(godave.NewNoopSession),
+		),
+
+		// Configure what to save on the cache
+		bot.WithCacheConfigOpts(
+			cache.WithCaches(
+				cache.FlagVoiceStates,
+			),
 		),
 		// add event listeners
 		bot.WithEventListenerFunc(handler),
