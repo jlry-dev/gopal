@@ -71,6 +71,9 @@ func (b *gopal) Run() {
 	s := make(chan os.Signal, 1)
 	signal.Notify(s, syscall.SIGINT, syscall.SIGTERM)
 	<-s
+
+	// Clean up
+	client.Close(context.Background())
 }
 
 func handler(m *events.MessageCreate) {
