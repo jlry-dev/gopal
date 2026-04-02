@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"log"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -92,12 +93,39 @@ func handler(m *events.MessageCreate) {
 
 	switch {
 	case strings.HasPrefix(message.Content, "?play"):
-		_, userIsJoined := bot.Caches.VoiceState(*message.GuildID, user.ID)
+		userVoiceState, userIsJoined := bot.Caches.VoiceState(*message.GuildID, user.ID)
 
 		if !userIsJoined {
 			bot.Rest.CreateMessage(m.ChannelID, discord.MessageCreate{
 				Content: "User is not in a voice channel.",
 			})
+		}
+
+		botVoiceState, botIsJoined := bot.Caches.VoiceState(*message.GuildID, bot.ID())
+
+		if !botIsJoined {
+			// Bot is not in a voice channel
+
+			err := bot.UpdateVoiceState(
+				context.TODO(),
+				*message.GuildID,
+				userVoiceState.ChannelID,
+				true,
+				true,
+			)
+			if err != nil {
+				log.Printf("Failed to join voice channel: %v", err)
+			}
+		} else if *botVoiceState.ChannelID != *userVoiceState.ChannelID {
+			// Bot and user are both in a voice channel
+			// pero dili parehas ug voice channel
+			bot.Rest.CreateMessage(m.ChannelID, discord.MessageCreate{
+				Content: "Bot is busy in a different voice channel.",
+			})
+		} else {
+			// Both are on the same channel
+			// TODO: play and queue
+			log.Println("TODO: play something or queue something")
 		}
 	}
 }
