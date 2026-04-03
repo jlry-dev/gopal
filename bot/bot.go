@@ -40,6 +40,8 @@ func (b *gopal) Run() {
 		os.Exit(-1)
 	}
 
+	dl := NewDisgoLink()
+
 	client, err := disgo.New(botToken,
 		bot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentMessageContent,
@@ -59,6 +61,8 @@ func (b *gopal) Run() {
 		),
 		// add event listeners
 		bot.WithEventListenerFunc(handler),
+		bot.WithEventListenerFunc(dl.onVoiceStateUpdate),
+		bot.WithEventListenerFunc(dl.onVoiceServerUpdate),
 	)
 	if err != nil {
 		panic(err)
