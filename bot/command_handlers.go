@@ -16,7 +16,7 @@ func (b *gopal) play(e *events.MessageCreate) {
 	contentSlice := strings.Fields(message.Content)
 	identifier := strings.Join(contentSlice[1:], " ")
 
-	if identifier != "" {
+	if identifier == "" {
 		return
 	}
 
