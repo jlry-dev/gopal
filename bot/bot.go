@@ -14,13 +14,12 @@ import (
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
-	"github.com/disgoorg/disgolink/v3/disgolink"
 	"github.com/disgoorg/godave"
 )
 
 type gopal struct {
-	logger          *slog.Logger
-	disgoLinkClient *disgolink.Client
+	logger    *slog.Logger
+	disgoLink *disgoLink
 }
 
 type Bot interface {
@@ -41,7 +40,7 @@ func (b *gopal) Run() {
 	}
 
 	dl := NewDisgoLink()
-	b.disgoLinkClient = &dl.lavalinkClient
+	b.disgoLink = dl
 
 	client, err := disgo.New(botToken,
 		bot.WithGatewayConfigOpts(gateway.WithIntents(
