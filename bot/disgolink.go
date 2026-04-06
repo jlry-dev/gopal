@@ -13,10 +13,8 @@ type disgoLink struct {
 	client disgolink.Client
 }
 
-func NewDisgoLink() *disgoLink {
-	lavaUID := snowflake.ID(1234567890)
-
-	client := disgolink.New(lavaUID)
+func NewDisgoLink(botID snowflake.ID) *disgoLink {
+	client := disgolink.New(botID)
 
 	_, err := client.AddNode(context.TODO(), disgolink.NodeConfig{
 		Name:      "test", // a unique node name

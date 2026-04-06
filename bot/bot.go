@@ -39,9 +39,6 @@ func (b *gopal) Run() {
 		os.Exit(-1)
 	}
 
-	dl := NewDisgoLink()
-	b.disgoLink = dl
-
 	client, err := disgo.New(botToken,
 		bot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentMessageContent,
@@ -61,12 +58,19 @@ func (b *gopal) Run() {
 		),
 		// add event listeners
 		bot.WithEventListenerFunc(b.onMessageCreate),
-		bot.WithEventListenerFunc(dl.onVoiceStateUpdate),
-		bot.WithEventListenerFunc(dl.onVoiceServerUpdate),
 	)
 	if err != nil {
 		panic(err)
 	}
+
+	dl := NewDisgoLink(client.ApplicationID)
+	b.disgoLink = dl
+
+	// Need para ma forward ang event padulnog sa disgolink
+	client.AddEventListeners(
+		bot.NewListenerFunc(dl.onVoiceServerUpdate),
+		bot.NewListenerFunc(dl.onVoiceStateUpdate),
+	)
 
 	if err = client.OpenGateway(context.TODO()); err != nil {
 		panic(err)
