@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"log"
+	"os"
 
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgolink/v3/disgolink"
@@ -15,13 +16,22 @@ type disgoLink struct {
 
 func NewDisgoLink(botID snowflake.ID) *disgoLink {
 	client := disgolink.New(botID)
+	lavalinkAddr, ok := os.LookupEnv("LAVALINK_ADDR")
+	if !ok {
+		log.Fatal("missing LAVALINK_ADDR env variable")
+	}
+
+	lavalinkPasswd, ok := os.LookupEnv("LAVALINK_PASSWORD")
+	if !ok {
+		log.Fatal("missing LAVALINK_PASSWORD env variable")
+	}
 
 	_, err := client.AddNode(context.TODO(), disgolink.NodeConfig{
-		Name:      "test", // a unique node name
-		Address:   "localhost:2333",
-		Password:  "youshallnotpass",
-		Secure:    false, // ws or wss
-		SessionID: "",    // only needed if you want to resume a previous lavalink session
+		Name:      "GoPal Lavalink Node",
+		Address:   lavalinkAddr,
+		Password:  lavalinkPasswd,
+		Secure:    false,
+		SessionID: "",
 	})
 	if err != nil {
 		log.Println("failed to add lavalink node")
