@@ -49,8 +49,12 @@ func (b *gopal) play(e *events.MessageCreate) {
 		// TODO: play if not currently playing
 	} else {
 		query := fmt.Sprintf("ytmsearch:%v", identifier)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
 		var toPlay *lavalink.Track
-		b.disgoLink.client.BestNode().LoadTracksHandler(context.TODO(), query, disgolink.NewResultHandler(
+		b.disgoLink.client.BestNode().LoadTracksHandler(ctx, query, disgolink.NewResultHandler(
 			func(track lavalink.Track) {
 				// Loaded a single track (from URL)
 				toPlay = &track
@@ -85,21 +89,16 @@ func (b *gopal) play(e *events.MessageCreate) {
 			return
 		}
 
-		// TODO: join bot to channel
-		err := client.UpdateVoiceState(context.TODO(), *e.GuildID, userVoiceState.ChannelID, false, false)
+		err := client.UpdateVoiceState(ctx, *e.GuildID, userVoiceState.ChannelID, false, false)
 		if err != nil {
 			b.logger.Error("failed to join voice channel", slog.String("ERROR", err.Error()))
 		}
 
-		<-time.Tick(2 * time.Second)
-
 		player := b.disgoLink.client.Player(*e.GuildID)
 
-		// TODO: play track
-		err = player.Update(context.TODO(), lavalink.WithTrack(*toPlay))
+		err = player.Update(ctx, lavalink.WithTrack(*toPlay))
 		if err != nil {
 			log.Fatal("Failed to play track:", err)
 		}
-
 	}
 }

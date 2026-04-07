@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
@@ -63,7 +64,10 @@ func (b *gopal) Run() {
 		panic(err)
 	}
 
-	dl := NewDisgoLink(client.ApplicationID)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dl := NewDisgoLink(client.ApplicationID, ctx)
 	b.disgoLink = dl
 
 	// Need para ma forward ang event padulnog sa disgolink
@@ -72,7 +76,7 @@ func (b *gopal) Run() {
 		bot.NewListenerFunc(dl.onVoiceStateUpdate),
 	)
 
-	if err = client.OpenGateway(context.TODO()); err != nil {
+	if err = client.OpenGateway(ctx); err != nil {
 		panic(err)
 	}
 

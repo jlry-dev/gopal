@@ -14,7 +14,7 @@ type disgoLink struct {
 	client disgolink.Client
 }
 
-func NewDisgoLink(botID snowflake.ID) *disgoLink {
+func NewDisgoLink(botID snowflake.ID, ctx context.Context) *disgoLink {
 	client := disgolink.New(botID)
 	lavalinkAddr, ok := os.LookupEnv("LAVALINK_ADDR")
 	if !ok {
@@ -26,7 +26,7 @@ func NewDisgoLink(botID snowflake.ID) *disgoLink {
 		log.Fatal("missing LAVALINK_PASSWORD env variable")
 	}
 
-	_, err := client.AddNode(context.TODO(), disgolink.NodeConfig{
+	_, err := client.AddNode(ctx, disgolink.NodeConfig{
 		Name:      "GoPal Lavalink Node",
 		Address:   lavalinkAddr,
 		Password:  lavalinkPasswd,
@@ -51,9 +51,9 @@ func (d *disgoLink) onVoiceStateUpdate(event *events.GuildVoiceStateUpdate) {
 		return
 	}
 
-	d.client.OnVoiceStateUpdate(context.TODO(), event.VoiceState.GuildID, event.VoiceState.ChannelID, event.VoiceState.SessionID)
+	d.client.OnVoiceStateUpdate(context.Background(), event.VoiceState.GuildID, event.VoiceState.ChannelID, event.VoiceState.SessionID)
 }
 
 func (d *disgoLink) onVoiceServerUpdate(event *events.VoiceServerUpdate) {
-	d.client.OnVoiceServerUpdate(context.TODO(), event.GuildID, event.Token, *event.Endpoint)
+	d.client.OnVoiceServerUpdate(context.Background(), event.GuildID, event.Token, *event.Endpoint)
 }
