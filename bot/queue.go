@@ -52,6 +52,12 @@ func (q *queueImp) PlayNext(ctx context.Context, player disgolink.Player) {
 	defer q.mu.Unlock()
 
 	track := q.Pop()
+
+	if track == nil {
+		// track is empty
+		return
+	}
+
 	player.Update(ctx, lavalink.WithTrack(*track))
 }
 
