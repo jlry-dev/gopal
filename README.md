@@ -1,12 +1,8 @@
 # Project GoPal
 
-A music discord bot that picks bot based on the mood of your music.
-
-# Required Packages
-
-[yt-dlp](https://github.com/yt-dlp/yt-dlp)\
-[ffmpeg](https://www.ffmpeg.org/)
+A music discord bot that picks music (WIP) based on the mood of your music.
 
 # Required Environment Variables
 BOT_TOKEN\
-GOOGLE_DEV_TOKEN
+LAVALINK_ADDR\
+LAVALINK_PASSWORD\
