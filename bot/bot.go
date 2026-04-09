@@ -15,6 +15,8 @@ import (
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
+	"github.com/disgoorg/disgolink/v3/disgolink"
+	"github.com/disgoorg/disgolink/v3/lavalink"
 	"github.com/disgoorg/godave"
 )
 
@@ -70,6 +72,9 @@ func (b *gopal) Run() {
 	defer cancel()
 
 	dl := NewDisgoLink(client.ApplicationID, ctx)
+	dl.client.AddListeners(
+		disgolink.NewListenerFunc(b.onTrackEnd),
+	)
 	b.disgoLink = dl
 
 	// Need para ma forward ang event padulnog sa disgolink
@@ -109,4 +114,13 @@ func (b *gopal) onMessageCreate(e *events.MessageCreate) {
 	case strings.HasPrefix(message.Content, "?play"):
 		b.play(e)
 	}
+}
+
+func (b *gopal) onTrackEnd(player disgolink.Player, e lavalink.TrackEndEvent) {
+	queue := b.queueManager.Get(e.GuildID())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	queue.PlayNext(ctx, player)
 }
