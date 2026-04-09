@@ -36,7 +36,7 @@ func (b *gopal) play(e *events.MessageCreate) {
 
 	botVoiceState, ok := client.Caches.VoiceState(*e.GuildID, client.ID())
 	if ok {
-		if userVoiceState.ChannelID != botVoiceState.ChannelID {
+		if *userVoiceState.ChannelID != *botVoiceState.ChannelID {
 			client.Rest.CreateMessage(e.ChannelID, discord.MessageCreate{
 				Content: "Bot is singing on a different voice channel.",
 			})
