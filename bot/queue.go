@@ -22,7 +22,7 @@ type Queue interface {
 
 func NewQueue() Queue {
 	return &queueImp{
-		tracks: make([]*lavalink.Track, 4),
+		tracks: []*lavalink.Track{},
 	}
 }
 
@@ -51,12 +51,12 @@ func (q *queueImp) PlayNext(ctx context.Context, player disgolink.Player) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	track := q.Pop()
-
-	if track == nil {
-		// track is empty
+	if len(q.tracks) < 1 {
 		return
 	}
+
+	track := q.tracks[0]
+	q.tracks = q.tracks[1:]
 
 	player.Update(ctx, lavalink.WithTrack(*track))
 }
