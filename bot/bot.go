@@ -19,8 +19,9 @@ import (
 )
 
 type gopal struct {
-	logger    *slog.Logger
-	disgoLink *disgoLink
+	logger       *slog.Logger
+	disgoLink    *disgoLink
+	queueManager QueueManager
 }
 
 type Bot interface {
@@ -29,7 +30,8 @@ type Bot interface {
 
 func NewBot(logger *slog.Logger) Bot {
 	return &gopal{
-		logger: logger,
+		logger:       logger,
+		queueManager: NewQueueManager(),
 	}
 }
 

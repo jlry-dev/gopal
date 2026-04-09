@@ -44,9 +44,62 @@ func (b *gopal) play(e *events.MessageCreate) {
 			return
 		}
 
-		// TODO: check if currently playing
-		// TODO: add to queue if currently playing
-		// TODO: play if not currently playing
+		query := fmt.Sprintf("ytmsearch:%v", identifier)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		var toPlay *lavalink.Track
+		b.disgoLink.client.BestNode().LoadTracksHandler(ctx, query, disgolink.NewResultHandler(
+			func(track lavalink.Track) {
+				// Loaded a single track (from URL)
+				toPlay = &track
+				log.Println("Loaded track:", track.Info.Title)
+			},
+			func(playlist lavalink.Playlist) {
+				// Loaded a playlist
+				log.Println("Loaded playlist:", playlist.Info.Name)
+				if len(playlist.Tracks) > 0 {
+					toPlay = &playlist.Tracks[0]
+				}
+			},
+			func(tracks []lavalink.Track) {
+				// Loaded search results
+				log.Println("Found", len(tracks), "tracks")
+				if len(tracks) > 0 {
+					toPlay = &tracks[0]
+				}
+			},
+			func() {
+				// No matches found
+				log.Println("No matches found for query:", query)
+			},
+			func(err error) {
+				// Error loading tracks
+				log.Println("Error loading tracks:", err)
+			},
+		))
+
+		player := b.disgoLink.client.Player(*e.GuildID)
+		// check if currently playing
+		if player.Track() == nil {
+			player.Update(ctx, lavalink.WithTrack(*toPlay))
+
+			return
+		}
+
+		queue := b.queueManager.Get(*e.GuildID)
+		queue.Push(toPlay)
+
+		client.Rest.CreateMessage(e.ChannelID, discord.MessageCreate{
+			Content: fmt.Sprintf("Added %v to the queue", toPlay.Info.Title),
+		})
+
+		// Recheck if the player ended while the track is being added to queue
+		if player.Track() == nil {
+			queue.PlayNext(ctx, player)
+		}
+
 	} else {
 		query := fmt.Sprintf("ytmsearch:%v", identifier)
 
