@@ -24,6 +24,7 @@ type gopal struct {
 	logger       *slog.Logger
 	disgoLink    *disgoLink
 	queueManager QueueManager
+	client       *bot.Client
 }
 
 type Bot interface {
@@ -68,6 +69,8 @@ func (b *gopal) Run() {
 		panic(err)
 	}
 
+	b.client = client
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -94,6 +97,7 @@ func (b *gopal) Run() {
 
 	// Clean up
 	client.Close(context.Background())
+	dl.client.Close()
 }
 
 func (b *gopal) onMessageCreate(e *events.MessageCreate) {

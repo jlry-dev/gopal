@@ -12,6 +12,7 @@ import (
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgolink/v3/disgolink"
 	"github.com/disgoorg/disgolink/v3/lavalink"
+	"github.com/disgoorg/snowflake/v2"
 )
 
 func (b *gopal) play(e *events.MessageCreate) {
@@ -36,6 +37,9 @@ func (b *gopal) play(e *events.MessageCreate) {
 
 	botVoiceState, ok := client.Caches.VoiceState(*e.GuildID, client.ID())
 	if ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
 		if *userVoiceState.ChannelID != *botVoiceState.ChannelID {
 			client.Rest.CreateMessage(e.ChannelID, discord.MessageCreate{
 				Content: "Bot is singing on a different voice channel.",
@@ -45,53 +49,68 @@ func (b *gopal) play(e *events.MessageCreate) {
 		}
 
 		query := fmt.Sprintf("ytmsearch:%v", identifier)
+		b.loadAndPlay(ctx, query, &e.ChannelID, e.GuildID)
 
+	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		var toPlay *lavalink.Track
-		b.disgoLink.client.BestNode().LoadTracksHandler(ctx, query, disgolink.NewResultHandler(
-			func(track lavalink.Track) {
-				// Loaded a single track (from URL)
-				toPlay = &track
-				log.Println("Loaded track:", track.Info.Title)
-			},
-			func(playlist lavalink.Playlist) {
-				// Loaded a playlist
-				log.Println("Loaded playlist:", playlist.Info.Name)
-				if len(playlist.Tracks) > 0 {
-					toPlay = &playlist.Tracks[0]
-				}
-			},
-			func(tracks []lavalink.Track) {
-				// Loaded search results
-				log.Println("Found", len(tracks), "tracks")
-				if len(tracks) > 0 {
-					toPlay = &tracks[0]
-				}
-			},
-			func() {
-				// No matches found
-				log.Println("No matches found for query:", query)
-			},
-			func(err error) {
-				// Error loading tracks
-				log.Println("Error loading tracks:", err)
-			},
-		))
-
-		player := b.disgoLink.client.Player(*e.GuildID)
-		// check if currently playing
-		if player.Track() == nil {
-			player.Update(ctx, lavalink.WithTrack(*toPlay))
-
-			return
+		// make the bot join
+		err := client.UpdateVoiceState(ctx, *e.GuildID, userVoiceState.ChannelID, true, true)
+		if err != nil {
+			b.logger.Error("failed to join voice channel", slog.String("ERROR", err.Error()))
 		}
 
-		queue := b.queueManager.Get(*e.GuildID)
+		query := fmt.Sprintf("ytmsearch:%v", identifier)
+
+		b.loadAndPlay(ctx, query, &e.ChannelID, e.GuildID)
+	}
+}
+
+func (b *gopal) loadAndPlay(ctx context.Context, query string, channelID, guildID *snowflake.ID) {
+	var toPlay *lavalink.Track
+	b.disgoLink.client.BestNode().LoadTracksHandler(ctx, query, disgolink.NewResultHandler(
+		func(track lavalink.Track) {
+			// Loaded a single track (from URL)
+			toPlay = &track
+			log.Println("Loaded track:", track.Info.Title)
+		},
+		func(playlist lavalink.Playlist) {
+			// Loaded a playlist
+			log.Println("Loaded playlist:", playlist.Info.Name)
+			if len(playlist.Tracks) > 0 {
+				toPlay = &playlist.Tracks[0]
+			}
+		},
+		func(tracks []lavalink.Track) {
+			// Loaded search results
+			if len(tracks) > 0 {
+				toPlay = &tracks[0]
+			}
+		},
+		func() {
+			// No matches found
+			log.Println("No matches found for query:", query)
+		},
+		func(err error) {
+			// Error loading tracks
+			log.Println("Error loading tracks:", err)
+		},
+	))
+
+	// no track found
+	if toPlay == nil {
+		return
+	}
+
+	player := b.disgoLink.client.Player(*guildID)
+
+	// check if currently playing
+	if player.Track() != nil {
+		queue := b.queueManager.Get(*guildID)
 		queue.Push(toPlay)
 
-		client.Rest.CreateMessage(e.ChannelID, discord.MessageCreate{
+		b.client.Rest.CreateMessage(*channelID, discord.MessageCreate{
 			Content: fmt.Sprintf("Added %v to the queue", toPlay.Info.Title),
 		})
 
@@ -100,58 +119,11 @@ func (b *gopal) play(e *events.MessageCreate) {
 			queue.PlayNext(ctx, player)
 		}
 
-	} else {
-		query := fmt.Sprintf("ytmsearch:%v", identifier)
+		return
+	}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		var toPlay *lavalink.Track
-		b.disgoLink.client.BestNode().LoadTracksHandler(ctx, query, disgolink.NewResultHandler(
-			func(track lavalink.Track) {
-				// Loaded a single track (from URL)
-				toPlay = &track
-				log.Println("Loaded track:", track.Info.Title)
-			},
-			func(playlist lavalink.Playlist) {
-				// Loaded a playlist
-				log.Println("Loaded playlist:", playlist.Info.Name)
-				if len(playlist.Tracks) > 0 {
-					toPlay = &playlist.Tracks[0]
-				}
-			},
-			func(tracks []lavalink.Track) {
-				// Loaded search results
-				log.Println("Found", len(tracks), "tracks")
-				if len(tracks) > 0 {
-					toPlay = &tracks[0]
-				}
-			},
-			func() {
-				// No matches found
-				log.Println("No matches found for query:", query)
-			},
-			func(err error) {
-				// Error loading tracks
-				log.Println("Error loading tracks:", err)
-			},
-		))
-
-		// no track found
-		if toPlay == nil {
-			return
-		}
-
-		err := client.UpdateVoiceState(ctx, *e.GuildID, userVoiceState.ChannelID, false, false)
-		if err != nil {
-			b.logger.Error("failed to join voice channel", slog.String("ERROR", err.Error()))
-		}
-
-		player := b.disgoLink.client.Player(*e.GuildID)
-
-		err = player.Update(ctx, lavalink.WithTrack(*toPlay))
-		if err != nil {
-			log.Fatal("Failed to play track:", err)
-		}
+	err := player.Update(ctx, lavalink.WithTrack(*toPlay))
+	if err != nil {
+		log.Fatal("Failed to play track:", err)
 	}
 }
