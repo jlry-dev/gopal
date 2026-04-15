@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/cache"
+	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
@@ -76,6 +78,7 @@ func (b *gopal) Run() {
 
 	dl := NewDisgoLink(client.ApplicationID, ctx)
 	dl.client.AddListeners(
+		disgolink.NewListenerFunc(b.onTrackStart),
 		disgolink.NewListenerFunc(b.onTrackEnd),
 	)
 	b.disgoLink = dl
@@ -117,6 +120,22 @@ func (b *gopal) onMessageCreate(e *events.MessageCreate) {
 	switch {
 	case strings.HasPrefix(message.Content, "?play"):
 		b.play(e)
+	}
+}
+
+func (b *gopal) onTrackStart(player disgolink.Player, e lavalink.TrackStartEvent) {
+	embed := discord.NewEmbedBuilder().
+		SetTitle("▶️ Now Playing").
+		SetDescription(fmt.Sprintf("%v - %v", e.Track.Info.Title, e.Track.Info.Author)).
+		SetColor(0x00ADD8).
+		Build()
+
+	var data TrackRequestData
+	if err := e.Track.UserData.Unmarshal(&data); err == nil {
+		b.client.Rest.CreateMessage(
+			data.ChannelID,
+			discord.NewMessageCreate().WithEmbeds(embed),
+		)
 	}
 }
 
