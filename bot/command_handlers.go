@@ -15,6 +15,11 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
+type TrackRequestData struct {
+	RequestedBy string       `json:"requested_by"`
+	ChannelID   snowflake.ID `json:"channel_id"`
+}
+
 func (b *gopal) play(e *events.MessageCreate) {
 	client := e.Client()
 	user := e.Message.Author
@@ -49,7 +54,7 @@ func (b *gopal) play(e *events.MessageCreate) {
 		}
 
 		query := fmt.Sprintf("ytmsearch:%v", identifier)
-		b.loadAndPlay(ctx, query, &e.ChannelID, e.GuildID)
+		b.loadAndPlay(ctx, query, &user, &e.ChannelID, e.GuildID)
 
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -63,11 +68,11 @@ func (b *gopal) play(e *events.MessageCreate) {
 
 		query := fmt.Sprintf("ytmsearch:%v", identifier)
 
-		b.loadAndPlay(ctx, query, &e.ChannelID, e.GuildID)
+		b.loadAndPlay(ctx, query, &user, &e.ChannelID, e.GuildID)
 	}
 }
 
-func (b *gopal) loadAndPlay(ctx context.Context, query string, channelID, guildID *snowflake.ID) {
+func (b *gopal) loadAndPlay(ctx context.Context, query string, user *discord.User, channelID, guildID *snowflake.ID) {
 	var toPlay *lavalink.Track
 	b.disgoLink.client.BestNode().LoadTracksHandler(ctx, query, disgolink.NewResultHandler(
 		func(track lavalink.Track) {
@@ -103,15 +108,20 @@ func (b *gopal) loadAndPlay(ctx context.Context, query string, channelID, guildI
 		return
 	}
 
+	trackWithData, err := toPlay.WithUserData(TrackRequestData{
+		RequestedBy: user.Username,
+		ChannelID:   *channelID,
+	})
+
 	player := b.disgoLink.client.Player(*guildID)
 
 	// check if currently playing
 	if player.Track() != nil {
 		queue := b.queueManager.Get(*guildID)
-		queue.Push(toPlay)
+		queue.Push(&trackWithData)
 
 		b.client.Rest.CreateMessage(*channelID, discord.MessageCreate{
-			Content: fmt.Sprintf("Added %v to the queue", toPlay.Info.Title),
+			Content: fmt.Sprintf("Added %v to the queue", trackWithData.Info.Title),
 		})
 
 		// Recheck if the player ended while the track is being added to queue
@@ -122,7 +132,7 @@ func (b *gopal) loadAndPlay(ctx context.Context, query string, channelID, guildI
 		return
 	}
 
-	err := player.Update(ctx, lavalink.WithTrack(*toPlay))
+	err = player.Update(ctx, lavalink.WithTrack(trackWithData))
 	if err != nil {
 		log.Fatal("Failed to play track:", err)
 	}
