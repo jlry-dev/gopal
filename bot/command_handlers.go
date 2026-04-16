@@ -72,6 +72,42 @@ func (b *gopal) play(e *events.MessageCreate) {
 	}
 }
 
+func (b *gopal) stop(e *events.MessageCreate) {
+	client := e.Client()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := client.UpdateVoiceState(ctx, *e.GuildID, nil, false, false); err != nil {
+		b.logger.Error("failed to update voice state (leaving)", slog.String("ERROR", err.Error()))
+		return
+	}
+
+	// update lavalink
+	player := b.disgoLink.client.Player(*e.GuildID)
+	if err := player.Update(ctx, lavalink.WithNullTrack()); err != nil {
+		b.logger.Error("failed to update player", slog.String("ERROR", err.Error()))
+		return
+	}
+
+	// remove the queue
+	b.queueManager.Remove(*e.GuildID)
+}
+
+func (b *gopal) skip(e *events.MessageCreate) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// update lavalink
+	player := b.disgoLink.client.Player(*e.GuildID)
+
+	// this stops the track which in turn trigger the EventTrackEnd and play the next track in queue
+	if err := player.Update(ctx, lavalink.WithNullTrack()); err != nil {
+		b.logger.Error("failed to update player", slog.String("ERROR", err.Error()))
+		return
+	}
+}
+
 func (b *gopal) loadAndPlay(ctx context.Context, query string, user *discord.User, channelID, guildID *snowflake.ID) {
 	var toPlay *lavalink.Track
 	b.disgoLink.client.BestNode().LoadTracksHandler(ctx, query, disgolink.NewResultHandler(

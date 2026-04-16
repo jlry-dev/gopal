@@ -120,6 +120,11 @@ func (b *gopal) onMessageCreate(e *events.MessageCreate) {
 	switch {
 	case strings.HasPrefix(message.Content, "?play"):
 		b.play(e)
+	case strings.HasPrefix(message.Content, "?stop"):
+		b.stop(e)
+	case strings.HasPrefix(message.Content, "?skip"):
+		b.skip(e)
+
 	}
 }
 
