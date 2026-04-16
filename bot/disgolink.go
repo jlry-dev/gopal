@@ -10,11 +10,11 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
-type disgoLink struct {
+type DisgoLink struct {
 	disgolink.Client
 }
 
-func NewDisgoLink(botID snowflake.ID, ctx context.Context) *disgoLink {
+func NewDisgoLink(botID snowflake.ID, ctx context.Context) *DisgoLink {
 	client := disgolink.New(botID)
 	lavalinkAddr, ok := os.LookupEnv("LAVALINK_ADDR")
 	if !ok {
@@ -37,14 +37,14 @@ func NewDisgoLink(botID snowflake.ID, ctx context.Context) *disgoLink {
 		log.Println("failed to add lavalink node")
 	}
 
-	dl := disgoLink{
+	dl := DisgoLink{
 		Client: client,
 	}
 
 	return &dl
 }
 
-func (d *disgoLink) onVoiceStateUpdate(event *events.GuildVoiceStateUpdate) {
+func (d *DisgoLink) onVoiceStateUpdate(event *events.GuildVoiceStateUpdate) {
 	client := event.Client()
 
 	// filter all non bot voice state updates out
@@ -55,6 +55,6 @@ func (d *disgoLink) onVoiceStateUpdate(event *events.GuildVoiceStateUpdate) {
 	d.OnVoiceStateUpdate(context.Background(), event.VoiceState.GuildID, event.VoiceState.ChannelID, event.VoiceState.SessionID)
 }
 
-func (d *disgoLink) onVoiceServerUpdate(event *events.VoiceServerUpdate) {
+func (d *DisgoLink) onVoiceServerUpdate(event *events.VoiceServerUpdate) {
 	d.OnVoiceServerUpdate(context.Background(), event.GuildID, event.Token, *event.Endpoint)
 }
