@@ -6,23 +6,16 @@ import (
 	"os"
 	"time"
 
-	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgolink/v3/disgolink"
 	"github.com/disgoorg/snowflake/v2"
 )
 
-type DisgoLink interface {
-	AddEventListeners(listeners ...bot.EventListener)
-	OnVoiceStateUpdateHandler(event *events.GuildVoiceStateUpdate)
-	OnVoiceServerUpdateHandler(event *events.VoiceServerUpdate)
-}
-
-type disgoLnk struct {
+type DisgoLink struct {
 	disgolink.Client
 }
 
-func NewDisgoLink(botID snowflake.ID) DisgoLink {
+func NewDisgoLink(botID snowflake.ID) *DisgoLink {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -48,14 +41,14 @@ func NewDisgoLink(botID snowflake.ID) DisgoLink {
 		log.Println("failed to add lavalink node")
 	}
 
-	dl := disgoLnk{
+	dl := DisgoLink{
 		Client: client,
 	}
 
 	return &dl
 }
 
-func (d *disgoLnk) OnVoiceStateUpdateHandler(event *events.GuildVoiceStateUpdate) {
+func (d *DisgoLink) OnVoiceStateUpdateHandler(event *events.GuildVoiceStateUpdate) {
 	client := event.Client()
 
 	// filter all non bot voice state updates out
@@ -66,10 +59,6 @@ func (d *disgoLnk) OnVoiceStateUpdateHandler(event *events.GuildVoiceStateUpdate
 	d.OnVoiceStateUpdate(context.Background(), event.VoiceState.GuildID, event.VoiceState.ChannelID, event.VoiceState.SessionID)
 }
 
-func (d *disgoLnk) OnVoiceServerUpdateHandler(event *events.VoiceServerUpdate) {
+func (d *DisgoLink) OnVoiceServerUpdateHandler(event *events.VoiceServerUpdate) {
 	d.OnVoiceServerUpdate(context.Background(), event.GuildID, event.Token, *event.Endpoint)
-}
-
-func (d *disgoLnk) AddEventListeners(listeners ...bot.EventListener) {
-	d.AddEventListeners(listeners...)
 }
