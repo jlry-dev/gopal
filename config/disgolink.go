@@ -15,7 +15,7 @@ type DisgoLink struct {
 	disgolink.Client
 }
 
-func NewDisgoLink(botID snowflake.ID) *DisgoLink {
+func Connect(botID snowflake.ID) *DisgoLink {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
