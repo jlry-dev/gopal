@@ -1,8 +1,7 @@
-package bot
+package gopal
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -13,20 +12,23 @@ import (
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/cache"
-	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/disgolink/v3/disgolink"
-	"github.com/disgoorg/disgolink/v3/lavalink"
 	"github.com/disgoorg/godave"
+	"github.com/jlry-dev/gopal/config"
+	"github.com/jlry-dev/gopal/handlers"
+	"github.com/jlry-dev/gopal/queue"
 )
 
 type gopal struct {
 	logger       *slog.Logger
-	disgoLink    *disgoLink
-	queueManager QueueManager
+	disgoLink    *config.DisgoLink
+	queueManager queue.QueueManager
 	client       *bot.Client
+	cmdHandler   handlers.CommandHandler
+	replyer      handlers.ReplyHandler
 }
 
 type Bot interface {
@@ -35,8 +37,7 @@ type Bot interface {
 
 func NewBot(logger *slog.Logger) Bot {
 	return &gopal{
-		logger:       logger,
-		queueManager: NewQueueManager(),
+		logger: logger,
 	}
 }
 
@@ -71,25 +72,33 @@ func (b *gopal) Run() {
 		panic(err)
 	}
 
-	b.client = client
+	dl := config.Connect(client.ApplicationID)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	replyer := handlers.NewReplyer(b.logger, client)
+	queueManager := queue.NewQueueManager()
+	cmdHandler := handlers.NewCommandHandler(b.logger, dl, queueManager, replyer)
 
-	dl := NewDisgoLink(client.ApplicationID, ctx)
-	dl.client.AddListeners(
-		disgolink.NewListenerFunc(b.onTrackStart),
-		disgolink.NewListenerFunc(b.onTrackEnd),
-	)
 	b.disgoLink = dl
+	b.replyer = replyer
+	b.cmdHandler = cmdHandler
+	b.queueManager = queueManager
 
 	// Need para ma forward ang event padulnog sa disgolink
 	client.AddEventListeners(
-		bot.NewListenerFunc(dl.onVoiceServerUpdate),
-		bot.NewListenerFunc(dl.onVoiceStateUpdate),
+		bot.NewListenerFunc(dl.OnVoiceServerUpdateHandler),
+		bot.NewListenerFunc(dl.OnVoiceStateUpdateHandler),
 	)
 
-	if err = client.OpenGateway(ctx); err != nil {
+	dl.AddListeners(
+		disgolink.NewListenerFunc(handlers.OnTrackStart(replyer)),
+		disgolink.NewListenerFunc(handlers.OnTrackEnd(queueManager)),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+	err = client.OpenGateway(ctx)
+	cancel()
+	if err != nil {
 		panic(err)
 	}
 
@@ -100,14 +109,14 @@ func (b *gopal) Run() {
 
 	// Clean up
 	client.Close(context.Background())
-	dl.client.Close()
+	dl.Close()
 }
 
 func (b *gopal) onMessageCreate(e *events.MessageCreate) {
 	bot := e.Client()
 	user := e.Message.Author
-
 	message := e.Message
+
 	// Return when bot is the same
 	if bot.ID() == user.ID {
 		return
@@ -117,38 +126,21 @@ func (b *gopal) onMessageCreate(e *events.MessageCreate) {
 		return
 	}
 
+	data := &handlers.EventDTO{
+		GuildID:   e.GuildID,
+		ChannelID: &e.ChannelID,
+		Client:    bot,
+		User:      &user,
+		Message:   message.Content,
+	}
+
 	switch {
 	case strings.HasPrefix(message.Content, "?play"):
-		b.play(e)
+		b.cmdHandler.Play(data)
 	case strings.HasPrefix(message.Content, "?stop"):
-		b.stop(e)
+		b.cmdHandler.Stop(data)
 	case strings.HasPrefix(message.Content, "?skip"):
-		b.skip(e)
+		b.cmdHandler.Skip(data)
 
 	}
-}
-
-func (b *gopal) onTrackStart(player disgolink.Player, e lavalink.TrackStartEvent) {
-	embed := discord.NewEmbedBuilder().
-		SetTitle("▶️ Now Playing").
-		SetDescription(fmt.Sprintf("%v - %v", e.Track.Info.Title, e.Track.Info.Author)).
-		SetColor(0x00ADD8).
-		Build()
-
-	var data TrackRequestData
-	if err := e.Track.UserData.Unmarshal(&data); err == nil {
-		b.client.Rest.CreateMessage(
-			data.ChannelID,
-			discord.NewMessageCreate().WithEmbeds(embed),
-		)
-	}
-}
-
-func (b *gopal) onTrackEnd(player disgolink.Player, e lavalink.TrackEndEvent) {
-	queue := b.queueManager.Get(e.GuildID())
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	queue.PlayNext(ctx, player)
 }

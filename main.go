@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/jlry-dev/gopal/bot"
+	"github.com/jlry-dev/gopal/bot/gopal"
 	"github.com/joho/godotenv"
 )
 
@@ -27,7 +27,7 @@ func main() {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
-	bot := bot.NewBot(logger)
+	bot := gopal.NewBot(logger)
 
 	bot.Run()
 }
