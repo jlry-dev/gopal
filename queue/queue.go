@@ -1,4 +1,4 @@
-package bot
+package queue
 
 import (
 	"context"
