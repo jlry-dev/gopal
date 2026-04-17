@@ -6,12 +6,14 @@ import (
 	"os"
 	"time"
 
+	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgolink/v3/disgolink"
 	"github.com/disgoorg/snowflake/v2"
 )
 
 type DisgoLink interface {
+	AddEventListeners(listeners ...bot.EventListener)
 	OnVoiceStateUpdateHandler(event *events.GuildVoiceStateUpdate)
 	OnVoiceServerUpdateHandler(event *events.VoiceServerUpdate)
 }
@@ -20,7 +22,7 @@ type disgoLnk struct {
 	disgolink.Client
 }
 
-func Connect(botID snowflake.ID) DisgoLink {
+func NewDisgoLink(botID snowflake.ID) DisgoLink {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -66,4 +68,8 @@ func (d *disgoLnk) OnVoiceStateUpdateHandler(event *events.GuildVoiceStateUpdate
 
 func (d *disgoLnk) OnVoiceServerUpdateHandler(event *events.VoiceServerUpdate) {
 	d.OnVoiceServerUpdate(context.Background(), event.GuildID, event.Token, *event.Endpoint)
+}
+
+func (d *disgoLnk) AddEventListeners(listeners ...bot.EventListener) {
+	d.AddEventListeners(listeners...)
 }
