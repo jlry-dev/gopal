@@ -1,4 +1,4 @@
-package bot
+package handlers
 
 import (
 	"context"
@@ -8,25 +8,58 @@ import (
 	"strings"
 	"time"
 
+	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/discord"
-	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgolink/v3/disgolink"
 	"github.com/disgoorg/disgolink/v3/lavalink"
 	"github.com/disgoorg/snowflake/v2"
+
+	"github.com/jlry-dev/gopal/config"
+	"github.com/jlry-dev/gopal/queue"
 )
 
 type TrackRequestData struct {
 	RequestedBy string       `json:"requested_by"`
+	GuildID     snowflake.ID `json:"guild_id"`
 	ChannelID   snowflake.ID `json:"channel_id"`
 }
 
-func (b *gopal) play(e *events.MessageCreate) {
-	client := e.Client()
-	user := e.Message.Author
+type EventDTO struct {
+	GuildID   *snowflake.ID
+	ChannelID *snowflake.ID
+	Client    *bot.Client
+	User      *discord.User
+	Message   string
+}
 
+type CommandHandler interface {
+	Play(data *EventDTO)
+	Stop(data *EventDTO)
+	Skip(data *EventDTO)
+}
+
+type cmdHandlr struct {
+	logger       *slog.Logger
+	disgoLink    *config.DisgoLink
+	queueManager queue.QueueManager
+	replyer      ReplyHandler
+}
+
+func NewCommandHandler(logger *slog.Logger, disgoLink *config.DisgoLink, queueManager queue.QueueManager, replyer ReplyHandler) CommandHandler {
+	return &cmdHandlr{
+		logger:       logger,
+		disgoLink:    disgoLink,
+		queueManager: queueManager,
+		replyer:      replyer,
+	}
+}
+
+func (h *cmdHandlr) Play(e *EventDTO) {
+	client := e.Client
+	user := e.User
 	message := e.Message
 
-	contentSlice := strings.Fields(message.Content)
+	contentSlice := strings.Fields(message)
 	identifier := strings.Join(contentSlice[1:], " ")
 
 	if identifier == "" {
@@ -35,7 +68,7 @@ func (b *gopal) play(e *events.MessageCreate) {
 
 	userVoiceState, ok := client.Caches.VoiceState(*e.GuildID, user.ID)
 	if !ok {
-		client.Rest.CreateMessage(e.ChannelID, discord.MessageCreate{
+		client.Rest.CreateMessage(*e.ChannelID, discord.MessageCreate{
 			Content: "You must be in a voice channel to use this command.",
 		})
 	}
@@ -46,7 +79,7 @@ func (b *gopal) play(e *events.MessageCreate) {
 		defer cancel()
 
 		if *userVoiceState.ChannelID != *botVoiceState.ChannelID {
-			client.Rest.CreateMessage(e.ChannelID, discord.MessageCreate{
+			client.Rest.CreateMessage(*e.ChannelID, discord.MessageCreate{
 				Content: "Bot is singing on a different voice channel.",
 			})
 
@@ -54,7 +87,7 @@ func (b *gopal) play(e *events.MessageCreate) {
 		}
 
 		query := fmt.Sprintf("ytmsearch:%v", identifier)
-		b.loadAndPlay(ctx, query, &user, &e.ChannelID, e.GuildID)
+		h.loadAndPlay(ctx, query, user, e.ChannelID, e.GuildID)
 
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -63,54 +96,54 @@ func (b *gopal) play(e *events.MessageCreate) {
 		// make the bot join
 		err := client.UpdateVoiceState(ctx, *e.GuildID, userVoiceState.ChannelID, true, true)
 		if err != nil {
-			b.logger.Error("failed to join voice channel", slog.String("ERROR", err.Error()))
+			h.logger.Error("failed to join voice channel", slog.String("ERROR", err.Error()))
 		}
 
 		query := fmt.Sprintf("ytmsearch:%v", identifier)
 
-		b.loadAndPlay(ctx, query, &user, &e.ChannelID, e.GuildID)
+		h.loadAndPlay(ctx, query, user, e.ChannelID, e.GuildID)
 	}
 }
 
-func (b *gopal) stop(e *events.MessageCreate) {
-	client := e.Client()
+func (h *cmdHandlr) Stop(e *EventDTO) {
+	client := e.Client
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	if err := client.UpdateVoiceState(ctx, *e.GuildID, nil, false, false); err != nil {
-		b.logger.Error("failed to update voice state (leaving)", slog.String("ERROR", err.Error()))
+		h.logger.Error("failed to update voice state (leaving)", slog.String("ERROR", err.Error()))
 		return
 	}
 
 	// update lavalink
-	player := b.disgoLink.client.Player(*e.GuildID)
+	player := h.disgoLink.Player(*e.GuildID)
 	if err := player.Update(ctx, lavalink.WithNullTrack()); err != nil {
-		b.logger.Error("failed to update player", slog.String("ERROR", err.Error()))
+		h.logger.Error("failed to update player", slog.String("ERROR", err.Error()))
 		return
 	}
 
 	// remove the queue
-	b.queueManager.Remove(*e.GuildID)
+	h.queueManager.Remove(*e.GuildID)
 }
 
-func (b *gopal) skip(e *events.MessageCreate) {
+func (h *cmdHandlr) Skip(e *EventDTO) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// update lavalink
-	player := b.disgoLink.client.Player(*e.GuildID)
+	player := h.disgoLink.Player(*e.GuildID)
 
 	// this stops the track which in turn trigger the EventTrackEnd and play the next track in queue
 	if err := player.Update(ctx, lavalink.WithNullTrack()); err != nil {
-		b.logger.Error("failed to update player", slog.String("ERROR", err.Error()))
+		h.logger.Error("failed to update player", slog.String("ERROR", err.Error()))
 		return
 	}
 }
 
-func (b *gopal) loadAndPlay(ctx context.Context, query string, user *discord.User, channelID, guildID *snowflake.ID) {
+func (h *cmdHandlr) loadAndPlay(ctx context.Context, query string, user *discord.User, channelID, guildID *snowflake.ID) {
 	var toPlay *lavalink.Track
-	b.disgoLink.client.BestNode().LoadTracksHandler(ctx, query, disgolink.NewResultHandler(
+	h.disgoLink.BestNode().LoadTracksHandler(ctx, query, disgolink.NewResultHandler(
 		func(track lavalink.Track) {
 			// Loaded a single track (from URL)
 			toPlay = &track
@@ -146,19 +179,18 @@ func (b *gopal) loadAndPlay(ctx context.Context, query string, user *discord.Use
 
 	trackWithData, err := toPlay.WithUserData(TrackRequestData{
 		RequestedBy: user.Username,
+		GuildID:     *guildID,
 		ChannelID:   *channelID,
 	})
 
-	player := b.disgoLink.client.Player(*guildID)
+	player := h.disgoLink.Player(*guildID)
 
 	// check if currently playing
 	if player.Track() != nil {
-		queue := b.queueManager.Get(*guildID)
+		queue := h.queueManager.Get(*guildID)
 		queue.Push(&trackWithData)
 
-		b.client.Rest.CreateMessage(*channelID, discord.MessageCreate{
-			Content: fmt.Sprintf("Added %v to the queue", trackWithData.Info.Title),
-		})
+		h.replyer.Send(fmt.Sprintf("Added %v to the queue", trackWithData.Info.Title), guildID, channelID)
 
 		// Recheck if the player ended while the track is being added to queue
 		if player.Track() == nil {
