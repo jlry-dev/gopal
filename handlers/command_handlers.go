@@ -71,6 +71,8 @@ func (h *cmdHandlr) Play(e *EventDTO) {
 		client.Rest.CreateMessage(*e.ChannelID, discord.MessageCreate{
 			Content: "You must be in a voice channel to use this command.",
 		})
+
+		return
 	}
 
 	botVoiceState, ok := client.Caches.VoiceState(*e.GuildID, client.ID())
@@ -202,6 +204,6 @@ func (h *cmdHandlr) loadAndPlay(ctx context.Context, query string, user *discord
 
 	err = player.Update(ctx, lavalink.WithTrack(trackWithData))
 	if err != nil {
-		log.Fatal("Failed to play track:", err)
+		log.Println("Failed to play track:", err)
 	}
 }
