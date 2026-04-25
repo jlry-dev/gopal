@@ -3,7 +3,6 @@ package handlers
 import (
 	"fmt"
 	"log/slog"
-	"runtime"
 
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/discord"
@@ -23,61 +22,37 @@ type ReplyHandler interface {
 }
 
 type replyHandlr struct {
-	replyCh chan *ReplyDTO
+	logger *slog.Logger
+	client *bot.Client
 }
 
 func NewReplyer(logger *slog.Logger, client *bot.Client) ReplyHandler {
-	workerCnt := runtime.NumCPU() * 5
-	ch := make(chan *ReplyDTO, workerCnt*2)
-
-	for range workerCnt {
-		go func() {
-			for data := range ch {
-				if data.Embed != nil {
-					_, err := client.Rest.CreateMessage(
-						*data.ChannelID,
-						discord.NewMessageCreate().WithEmbeds(*data.Embed),
-					)
-					if err != nil {
-						logger.Error(fmt.Sprintf("failed to reply the message %v", err))
-					}
-
-				} else {
-					_, err := client.Rest.CreateMessage(*data.ChannelID, discord.MessageCreate{
-						Content: data.Content,
-					})
-					if err != nil {
-						logger.Error(fmt.Sprintf("failed to reply the message %v", err))
-					}
-
-				}
-			}
-		}()
-	}
-
 	replyer := replyHandlr{
-		replyCh: ch,
+		logger: logger,
+		client: client,
 	}
 
 	return &replyer
 }
 
 func (r *replyHandlr) Send(content string, guildID, channelID *snowflake.ID) {
-	data := &ReplyDTO{
-		GuildID:   guildID,
-		ChannelID: channelID,
-		Content:   content,
+	_, err := r.client.Rest.CreateMessage(
+		*channelID,
+		discord.MessageCreate{
+			Content: content,
+		},
+	)
+	if err != nil {
+		r.logger.Error(fmt.Sprintf("failed to reply the message %v", err))
 	}
-
-	r.replyCh <- data
 }
 
 func (r *replyHandlr) SendWithEmbed(embed *discord.Embed, guildID, channelID *snowflake.ID) {
-	data := &ReplyDTO{
-		GuildID:   guildID,
-		ChannelID: channelID,
-		Embed:     embed,
+	_, err := r.client.Rest.CreateMessage(
+		*channelID,
+		discord.NewMessageCreate().WithEmbeds(*embed),
+	)
+	if err != nil {
+		r.logger.Error(fmt.Sprintf("failed to reply the message %v", err))
 	}
-
-	r.replyCh <- data
 }
