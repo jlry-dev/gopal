@@ -15,7 +15,7 @@ type queueImp struct {
 }
 
 type Queue interface {
-	Push(track *lavalink.Track)
+	Push(track *lavalink.Track) int
 	Pop() *lavalink.Track
 	PlayNext(ctx context.Context, player disgolink.Player)
 }
@@ -26,11 +26,13 @@ func NewQueue() Queue {
 	}
 }
 
-func (q *queueImp) Push(track *lavalink.Track) {
+func (q *queueImp) Push(track *lavalink.Track) int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	q.tracks = append(q.tracks, track)
+
+	return len(q.tracks)
 }
 
 func (q *queueImp) Pop() *lavalink.Track {
