@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net/url"
 	"strings"
 	"time"
 
@@ -68,9 +69,11 @@ func (h *cmdHandlr) Play(e *EventDTO) {
 
 	userVoiceState, ok := client.Caches.VoiceState(*e.GuildID, user.ID)
 	if !ok {
-		client.Rest.CreateMessage(*e.ChannelID, discord.MessageCreate{
-			Content: "You must be in a voice channel to use this command.",
-		})
+		h.replyer.Send(
+			"**You must be in a voice channel to use this command.**",
+			e.GuildID,
+			e.ChannelID,
+		)
 
 		return
 	}
@@ -81,9 +84,11 @@ func (h *cmdHandlr) Play(e *EventDTO) {
 		defer cancel()
 
 		if *userVoiceState.ChannelID != *botVoiceState.ChannelID {
-			client.Rest.CreateMessage(*e.ChannelID, discord.MessageCreate{
-				Content: "Bot is singing on a different voice channel.",
-			})
+			h.replyer.Send(
+				"**Bot is singing on a different voice channel.**",
+				e.GuildID,
+				e.ChannelID,
+			)
 
 			return
 		}
@@ -190,14 +195,30 @@ func (h *cmdHandlr) loadAndPlay(ctx context.Context, query string, user *discord
 	// check if currently playing
 	if player.Track() != nil {
 		queue := h.queueManager.Get(*guildID)
-		queue.Push(&trackWithData)
-
-		h.replyer.Send(fmt.Sprintf("Added %v to the queue", trackWithData.Info.Title), guildID, channelID)
+		queuePos := queue.Push(&trackWithData)
 
 		// Recheck if the player ended while the track is being added to queue
 		if player.Track() == nil {
 			queue.PlayNext(ctx, player)
+			return
 		}
+
+		var thumbnailURL string
+		if trackWithData.Info.ArtworkURL == nil && trackWithData.Info.SourceName == "youtube" {
+			videoID := extractYouTubeID(*trackWithData.Info.URI)
+			thumbnailURL = fmt.Sprintf("https://img.youtube.com/vi/%s/mqdefault.jpg", videoID)
+		}
+
+		embed := buildQueueAddedEmbed(
+			trackWithData.Info.Title,
+			*trackWithData.Info.URI,
+			trackWithData.Info.Author,
+			trackWithData.Info.Length.String(),
+			queuePos,
+			thumbnailURL,
+		)
+
+		h.replyer.SendWithEmbed(&embed, guildID, channelID)
 
 		return
 	}
@@ -206,4 +227,42 @@ func (h *cmdHandlr) loadAndPlay(ctx context.Context, query string, user *discord
 	if err != nil {
 		log.Println("Failed to play track:", err)
 	}
+}
+
+func extractYouTubeID(uri string) string {
+	u, err := url.Parse(uri)
+	if err != nil {
+		return ""
+	}
+	return u.Query().Get("v")
+}
+
+func buildQueueAddedEmbed(
+	trackTitle string,
+	trackURL string,
+	artist string,
+	trackLength string,
+	positionQueue int,
+	thumbnailURL string,
+) discord.Embed {
+	boolptr := true
+
+	return discord.NewEmbedBuilder().
+		SetTitle("⏳ Added Track").
+		SetColor(0x00ADD8).
+		SetDescriptionf("**Track**\n **[%s - %s](%s)**", trackTitle, artist, trackURL).
+		AddFields(
+			discord.EmbedField{
+				Name:   "Track Length",
+				Value:  trackLength,
+				Inline: &boolptr,
+			},
+			discord.EmbedField{
+				Name:   "Position in queue",
+				Value:  fmt.Sprintf("%d", positionQueue),
+				Inline: &boolptr,
+			},
+		).
+		SetImage(thumbnailURL).
+		Build()
 }

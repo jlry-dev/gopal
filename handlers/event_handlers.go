@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/disgoorg/disgo/discord"
@@ -13,16 +12,20 @@ import (
 
 func OnTrackStart(r ReplyHandler) func(disgolink.Player, lavalink.TrackStartEvent) {
 	return func(player disgolink.Player, e lavalink.TrackStartEvent) {
-		embed := discord.NewEmbedBuilder().
-			SetTitle("▶️ Now Playing").
-			SetDescription(fmt.Sprintf("%v - %v", e.Track.Info.Title, e.Track.Info.Author)).
-			SetColor(0x00ADD8).
-			Build()
-
 		var data TrackRequestData
 		if err := e.Track.UserData.Unmarshal(&data); err == nil {
-			r.SendWithEmbed(&embed, &data.GuildID, &data.ChannelID)
+			// TODO: log error here
 		}
+
+		track := e.Track.Info
+
+		embed := buildNowPlayingEmbed(
+			track.Title,
+			*track.URI,
+			track.Author,
+		)
+
+		r.SendWithEmbed(&embed, &data.GuildID, &data.ChannelID)
 	}
 }
 
@@ -39,4 +42,16 @@ func OnTrackEnd(queueManager queue.QueueManager) func(disgolink.Player, lavalink
 
 		queue.PlayNext(ctx, player)
 	}
+}
+
+func buildNowPlayingEmbed(
+	trackTitle string,
+	trackURL string,
+	artist string,
+) discord.Embed {
+	return discord.NewEmbedBuilder().
+		SetTitle("").
+		SetColor(0x00ADD8).
+		SetDescriptionf("▶️ **Now Playing [%s - %s](%s)**", trackTitle, artist, trackURL).
+		Build()
 }
