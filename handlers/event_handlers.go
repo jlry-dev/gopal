@@ -8,9 +8,10 @@ import (
 	"github.com/disgoorg/disgolink/v3/disgolink"
 	"github.com/disgoorg/disgolink/v3/lavalink"
 	"github.com/jlry-dev/gopal/queue"
+	"github.com/jlry-dev/gopal/recommender"
 )
 
-func OnTrackStart(r ReplyHandler) func(disgolink.Player, lavalink.TrackStartEvent) {
+func OnTrackStart(r ReplyHandler, rcdr recommender.Recommender) func(disgolink.Player, lavalink.TrackStartEvent) {
 	return func(player disgolink.Player, e lavalink.TrackStartEvent) {
 		var data TrackRequestData
 		if err := e.Track.UserData.Unmarshal(&data); err == nil {
@@ -24,6 +25,8 @@ func OnTrackStart(r ReplyHandler) func(disgolink.Player, lavalink.TrackStartEven
 			*track.URI,
 			track.Author,
 		)
+
+		rcdr.GetSimilarTrack(track.Title, track.Author)
 
 		r.SendWithEmbed(&embed, &data.GuildID, &data.ChannelID)
 	}

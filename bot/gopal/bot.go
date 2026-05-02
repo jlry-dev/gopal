@@ -20,6 +20,7 @@ import (
 	"github.com/jlry-dev/gopal/config"
 	"github.com/jlry-dev/gopal/handlers"
 	"github.com/jlry-dev/gopal/queue"
+	"github.com/jlry-dev/gopal/recommender"
 )
 
 type gopal struct {
@@ -83,6 +84,8 @@ func (b *gopal) Run() {
 	b.cmdHandler = cmdHandler
 	b.queueManager = queueManager
 
+	reccomndr := recommender.NewReccomender(b.logger)
+
 	// Need para ma forward ang event padulnog sa disgolink
 	client.AddEventListeners(
 		bot.NewListenerFunc(dl.OnVoiceServerUpdateHandler),
@@ -90,7 +93,7 @@ func (b *gopal) Run() {
 	)
 
 	dl.AddListeners(
-		disgolink.NewListenerFunc(handlers.OnTrackStart(replyer)),
+		disgolink.NewListenerFunc(handlers.OnTrackStart(replyer, reccomndr)),
 		disgolink.NewListenerFunc(handlers.OnTrackEnd(queueManager)),
 	)
 
