@@ -141,11 +141,9 @@ func (h *cmdHandlr) Skip(e *EventDTO) {
 	// update lavalink
 	player := h.disgoLink.Player(*e.GuildID)
 
-	// this stops the track which in turn trigger the EventTrackEnd and play the next track in queue
-	if err := player.Update(ctx, lavalink.WithNullTrack()); err != nil {
-		h.logger.Error("failed to update player", slog.String("ERROR", err.Error()))
-		return
-	}
+	queue := h.queueManager.Get(*e.GuildID)
+
+	queue.PlayNext(ctx, player)
 }
 
 func (h *cmdHandlr) loadAndPlay(ctx context.Context, query string, user *discord.User, channelID, guildID *snowflake.ID) {
