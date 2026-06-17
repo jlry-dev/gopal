@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/disgoorg/disgo/discord"
@@ -26,7 +27,8 @@ func OnTrackStart(r ReplyHandler, rcdr recommender.Recommender) func(disgolink.P
 			track.Author,
 		)
 
-		rcdr.GetSimilarTrack(track.Title, track.Author)
+		next := rcdr.GetSimilarTrack(track.Title, track.Author)
+		fmt.Println(next)
 
 		r.SendWithEmbed(&embed, &data.GuildID, &data.ChannelID)
 	}

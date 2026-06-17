@@ -30,28 +30,49 @@ func NewReccomender(logger *slog.Logger) Recommender {
 func (r *reccomndr) GetSimilarTrack(title, author string) string {
 	spotifyID, _ := getSpotifyID(fmt.Sprintf("track:%v artist:%v", title, author))
 
-	reccobeats, err := getReccoBeatsID(spotifyID)
+	// get candidates
+	candidates, err := getSimilar(spotifyID, 10)
 	if err != nil {
 		r.logger.Error("failed to fetch similar track", "error", err)
 	}
 
-	if reccobeats != "" {
-		feature, err := getReccoBeatsFeature(reccobeats)
-		if err != nil || feature == nil {
-			r.logger.Error("failed to fetch similar track", "error", err)
-			return ""
-		}
-
-		fmt.Printf("ID: %v\n", feature.ID)
-		fmt.Printf("Energy: %v\n", feature.Energy)
-		fmt.Printf("Valence: %v\n", feature.Valence)
-
-		return ""
-
+	sessionTrackRBID, err := getReccoBeatsID(spotifyID)
+	if err != nil {
+		r.logger.Error("failed to fetch similar track", "error", err)
 	}
 
-	return ""
+	// this is for retrieving the selected song later
+	titleMap := map[string]string{}
+
+	ids := sessionTrackRBID + ","
+	for i, t := range candidates {
+		titleMap[t.ID] = t.Title + " - " + t.Artist[0].Name
+		if i == len(candidates)-1 {
+			ids = ids + t.ID
+			continue
+		}
+
+		ids = ids + t.ID + ","
+	}
+
+	features, err := getReccoBeatsMultiFeatures(ids)
+	if err != nil {
+		r.logger.Error("failed to fetch similar track", "error", err)
+	}
+
+	fmt.Printf("%v\n", features)
+
+	// Find the current one playing
+	// Isolate it and compare it to the others
+	recommendations := Rank(sessionTrackRBID, features)
+
+	fmt.Printf("%v\n", recommendations)
+
+	return titleMap[recommendations[0].ID]
 }
+
+// func analyze(valence, energy string) string {
+// }
 
 func getAccessToken() (string, error) {
 	clientID, ok := os.LookupEnv("SPOTIFY_CLIENT_ID")
