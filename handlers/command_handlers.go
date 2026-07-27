@@ -20,7 +20,8 @@ import (
 )
 
 type TrackRequestData struct {
-	RequestedBy string       `json:"requested_by"`
+	RequestedBy string `json:"requested_by"`
+	User        *discord.User
 	GuildID     snowflake.ID `json:"guild_id"`
 	ChannelID   snowflake.ID `json:"channel_id"`
 }
@@ -37,6 +38,7 @@ type CommandHandler interface {
 	Play(data *EventDTO)
 	Stop(data *EventDTO)
 	Skip(data *EventDTO)
+	LoadAndPlay(ctx context.Context, query string, user *discord.User, channelID, guildID *snowflake.ID)
 }
 
 type cmdHandlr struct {
@@ -94,7 +96,7 @@ func (h *cmdHandlr) Play(e *EventDTO) {
 		}
 
 		query := fmt.Sprintf("ytmsearch:%v", identifier)
-		h.loadAndPlay(ctx, query, user, e.ChannelID, e.GuildID)
+		h.LoadAndPlay(ctx, query, user, e.ChannelID, e.GuildID)
 
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -108,7 +110,7 @@ func (h *cmdHandlr) Play(e *EventDTO) {
 
 		query := fmt.Sprintf("ytmsearch:%v", identifier)
 
-		h.loadAndPlay(ctx, query, user, e.ChannelID, e.GuildID)
+		h.LoadAndPlay(ctx, query, user, e.ChannelID, e.GuildID)
 	}
 }
 
@@ -146,7 +148,7 @@ func (h *cmdHandlr) Skip(e *EventDTO) {
 	queue.PlayNext(ctx, player)
 }
 
-func (h *cmdHandlr) loadAndPlay(ctx context.Context, query string, user *discord.User, channelID, guildID *snowflake.ID) {
+func (h *cmdHandlr) LoadAndPlay(ctx context.Context, query string, user *discord.User, channelID, guildID *snowflake.ID) {
 	var toPlay *lavalink.Track
 	h.disgoLink.BestNode().LoadTracksHandler(ctx, query, disgolink.NewResultHandler(
 		func(track lavalink.Track) {
@@ -184,6 +186,7 @@ func (h *cmdHandlr) loadAndPlay(ctx context.Context, query string, user *discord
 
 	trackWithData, err := toPlay.WithUserData(TrackRequestData{
 		RequestedBy: user.Username,
+		User:        user,
 		GuildID:     *guildID,
 		ChannelID:   *channelID,
 	})

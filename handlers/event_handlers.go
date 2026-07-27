@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/disgoorg/disgo/discord"
@@ -11,7 +12,7 @@ import (
 	"github.com/jlry-dev/gopal/recommender"
 )
 
-func OnTrackStart(r ReplyHandler, rcdr recommender.Recommender) func(disgolink.Player, lavalink.TrackStartEvent) {
+func OnTrackStart(r ReplyHandler) func(disgolink.Player, lavalink.TrackStartEvent) {
 	return func(player disgolink.Player, e lavalink.TrackStartEvent) {
 		var data TrackRequestData
 		if err := e.Track.UserData.Unmarshal(&data); err == nil {
@@ -26,19 +27,34 @@ func OnTrackStart(r ReplyHandler, rcdr recommender.Recommender) func(disgolink.P
 			track.Author,
 		)
 
-		rcdr.GetSimilarTrack(track.Title, track.Author)
-
 		r.SendWithEmbed(&embed, &data.GuildID, &data.ChannelID)
 	}
 }
 
-func OnTrackEnd(queueManager queue.QueueManager) func(disgolink.Player, lavalink.TrackEndEvent) {
+func OnTrackEnd(queueManager queue.QueueManager, rcdr recommender.Recommender, cmdHandler CommandHandler) func(disgolink.Player, lavalink.TrackEndEvent) {
 	return func(player disgolink.Player, e lavalink.TrackEndEvent) {
 		if !e.Reason.MayStartNext() {
 			return
 		}
 
 		queue := queueManager.Get(e.GuildID())
+
+		if queue.Len() <= 0 {
+
+			var data TrackRequestData
+			if err := e.Track.UserData.Unmarshal(&data); err == nil {
+				// TODO: log error here
+			}
+
+			track := e.Track.Info
+			next := rcdr.GetSimilarTrack(track.Title, track.Author)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			query := fmt.Sprintf("ytmsearch:%v", next)
+			cmdHandler.LoadAndPlay(ctx, query, data.User, &data.ChannelID, &data.GuildID)
+			return
+		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

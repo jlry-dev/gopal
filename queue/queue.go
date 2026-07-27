@@ -18,6 +18,7 @@ type Queue interface {
 	Push(track *lavalink.Track) int
 	Pop() *lavalink.Track
 	PlayNext(ctx context.Context, player disgolink.Player)
+	Len() int
 }
 
 func NewQueue() Queue {
@@ -47,6 +48,13 @@ func (q *queueImp) Pop() *lavalink.Track {
 	q.tracks = q.tracks[1:]
 
 	return track
+}
+
+func (q *queueImp) Len() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	return len(q.tracks)
 }
 
 func (q *queueImp) PlayNext(ctx context.Context, player disgolink.Player) {

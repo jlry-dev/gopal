@@ -49,7 +49,8 @@ func (b *gopal) Run() {
 		os.Exit(-1)
 	}
 
-	client, err := disgo.New(botToken,
+	client, err := disgo.New(
+		botToken,
 		bot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentMessageContent,
 			gateway.IntentGuilds,
@@ -93,8 +94,8 @@ func (b *gopal) Run() {
 	)
 
 	dl.AddListeners(
-		disgolink.NewListenerFunc(handlers.OnTrackStart(replyer, reccomndr)),
-		disgolink.NewListenerFunc(handlers.OnTrackEnd(queueManager)),
+		disgolink.NewListenerFunc(handlers.OnTrackStart(replyer)),
+		disgolink.NewListenerFunc(handlers.OnTrackEnd(queueManager, reccomndr, cmdHandler)),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
