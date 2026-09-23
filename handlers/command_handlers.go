@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/url"
 	"strings"
@@ -62,6 +61,10 @@ func (h *cmdHandlr) Play(e *EventDTO) {
 	user := e.User
 	message := e.Message
 
+	if e.GuildID == nil || e.ChannelID == nil {
+		return
+	}
+
 	contentSlice := strings.Fields(message)
 	identifier := strings.Join(contentSlice[1:], " ")
 
@@ -95,7 +98,7 @@ func (h *cmdHandlr) Play(e *EventDTO) {
 			return
 		}
 
-		query := fmt.Sprintf("ytmsearch:%v", identifier)
+		query := fmt.Sprintf("scsearch:%v", identifier)
 		h.LoadAndPlay(ctx, query, user, e.ChannelID, e.GuildID)
 
 	} else {
@@ -108,7 +111,7 @@ func (h *cmdHandlr) Play(e *EventDTO) {
 			h.logger.Error("failed to join voice channel", slog.String("ERROR", err.Error()))
 		}
 
-		query := fmt.Sprintf("ytmsearch:%v", identifier)
+		query := fmt.Sprintf("scsearch:%v", identifier)
 
 		h.LoadAndPlay(ctx, query, user, e.ChannelID, e.GuildID)
 	}
@@ -116,6 +119,10 @@ func (h *cmdHandlr) Play(e *EventDTO) {
 
 func (h *cmdHandlr) Stop(e *EventDTO) {
 	client := e.Client
+
+	if e.GuildID == nil {
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -137,6 +144,10 @@ func (h *cmdHandlr) Stop(e *EventDTO) {
 }
 
 func (h *cmdHandlr) Skip(e *EventDTO) {
+	if e.GuildID == nil || e.ChannelID == nil {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -145,20 +156,35 @@ func (h *cmdHandlr) Skip(e *EventDTO) {
 
 	queue := h.queueManager.Get(*e.GuildID)
 
+	if queue.Len() == 0 {
+		h.replyer.Send("Nothing is queued to skip.", e.GuildID, e.ChannelID)
+		return
+	}
+
 	queue.PlayNext(ctx, player)
 }
 
 func (h *cmdHandlr) LoadAndPlay(ctx context.Context, query string, user *discord.User, channelID, guildID *snowflake.ID) {
+	if guildID == nil || channelID == nil || user == nil {
+		return
+	}
+
+	node := h.disgoLink.BestNode()
+	if node == nil {
+		h.logger.Error("no lavalink node available", "query", query)
+		return
+	}
+
 	var toPlay *lavalink.Track
-	h.disgoLink.BestNode().LoadTracksHandler(ctx, query, disgolink.NewResultHandler(
+	node.LoadTracksHandler(ctx, query, disgolink.NewResultHandler(
 		func(track lavalink.Track) {
 			// Loaded a single track (from URL)
 			toPlay = &track
-			log.Println("Loaded track:", track.Info.Title)
+			h.logger.Info("Loaded track", "title", track.Info.Title)
 		},
 		func(playlist lavalink.Playlist) {
 			// Loaded a playlist
-			log.Println("Loaded playlist:", playlist.Info.Name)
+			h.logger.Info("Loaded playlist", "name", playlist.Info.Name)
 			if len(playlist.Tracks) > 0 {
 				toPlay = &playlist.Tracks[0]
 			}
@@ -171,11 +197,11 @@ func (h *cmdHandlr) LoadAndPlay(ctx context.Context, query string, user *discord
 		},
 		func() {
 			// No matches found
-			log.Println("No matches found for query:", query)
+			h.logger.Warn("No matches found for query", "query", query)
 		},
 		func(err error) {
 			// Error loading tracks
-			log.Println("Error loading tracks:", err)
+			h.logger.Error("Error loading tracks", "query", query, "error", err)
 		},
 	))
 
@@ -190,6 +216,10 @@ func (h *cmdHandlr) LoadAndPlay(ctx context.Context, query string, user *discord
 		GuildID:     *guildID,
 		ChannelID:   *channelID,
 	})
+	if err != nil {
+		h.logger.Error("failed to attach user data to track", "title", toPlay.Info.Title, "error", err)
+		return
+	}
 
 	player := h.disgoLink.Player(*guildID)
 
@@ -200,19 +230,23 @@ func (h *cmdHandlr) LoadAndPlay(ctx context.Context, query string, user *discord
 
 		// Recheck if the player ended while the track is being added to queue
 		if player.Track() == nil {
+			if err := h.waitForPlayerReady(ctx, player); err != nil {
+				h.logger.Error("player did not become ready to play 1", "guild", *guildID, "error", err)
+				return
+			}
 			queue.PlayNext(ctx, player)
 			return
 		}
 
 		var thumbnailURL string
 		if trackWithData.Info.ArtworkURL == nil && trackWithData.Info.SourceName == "youtube" {
-			videoID := extractYouTubeID(*trackWithData.Info.URI)
+			videoID := extractYouTubeID(uriString(trackWithData.Info.URI))
 			thumbnailURL = fmt.Sprintf("https://img.youtube.com/vi/%s/mqdefault.jpg", videoID)
 		}
 
 		embed := buildQueueAddedEmbed(
 			trackWithData.Info.Title,
-			*trackWithData.Info.URI,
+			uriString(trackWithData.Info.URI),
 			trackWithData.Info.Author,
 			trackWithData.Info.Length.String(),
 			queuePos,
@@ -224,10 +258,42 @@ func (h *cmdHandlr) LoadAndPlay(ctx context.Context, query string, user *discord
 		return
 	}
 
+	// if err := h.waitForPlayerReady(ctx, player); err != nil {
+	// 	h.logger.Error("player did not become ready to play 2", "guild", *guildID, "error", err)
+	// 	return
+	// }
+
 	err = player.Update(ctx, lavalink.WithTrack(trackWithData))
 	if err != nil {
-		log.Println("Failed to play track:", err)
+		h.logger.Error("failed to play track", "title", trackWithData.Info.Title, "error", err)
 	}
+}
+
+// waitForPlayerReady blocks until the player's voice session is connected
+// to Lavalink. The voice connection is established asynchronously after the
+// bot joins a channel, so playing before it is ready silently drops the track.
+func (h *cmdHandlr) waitForPlayerReady(ctx context.Context, player disgolink.Player) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if player.State().Connected {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func uriString(uri *string) string {
+	if uri == nil {
+		return ""
+	}
+	return *uri
 }
 
 func extractYouTubeID(uri string) string {
@@ -248,10 +314,10 @@ func buildQueueAddedEmbed(
 ) discord.Embed {
 	boolptr := true
 
-	return discord.NewEmbedBuilder().
-		SetTitle("⏳ Added Track").
-		SetColor(0x00ADD8).
-		SetDescriptionf("**Track**\n **[%s - %s](%s)**", trackTitle, artist, trackURL).
+	return discord.NewEmbed().
+		WithTitle("⏳ Added Track").
+		WithColor(0x00ADD8).
+		WithDescriptionf("**Track**\n **[%s - %s](%s)**", trackTitle, artist, trackURL).
 		AddFields(
 			discord.EmbedField{
 				Name:   "Track Length",
@@ -264,6 +330,5 @@ func buildQueueAddedEmbed(
 				Inline: &boolptr,
 			},
 		).
-		SetImage(thumbnailURL).
-		Build()
+		WithImage(thumbnailURL)
 }

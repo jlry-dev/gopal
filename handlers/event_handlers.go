@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/disgoorg/disgo/discord"
@@ -12,18 +13,19 @@ import (
 	"github.com/jlry-dev/gopal/recommender"
 )
 
-func OnTrackStart(r ReplyHandler) func(disgolink.Player, lavalink.TrackStartEvent) {
+func OnTrackStart(logger *slog.Logger, r ReplyHandler) func(disgolink.Player, lavalink.TrackStartEvent) {
 	return func(player disgolink.Player, e lavalink.TrackStartEvent) {
 		var data TrackRequestData
-		if err := e.Track.UserData.Unmarshal(&data); err == nil {
-			// TODO: log error here
+		if err := e.Track.UserData.Unmarshal(&data); err != nil {
+			logger.Warn("failed to unmarshal track user data", "error", err)
+			return
 		}
 
 		track := e.Track.Info
 
 		embed := buildNowPlayingEmbed(
 			track.Title,
-			*track.URI,
+			uriString(track.URI),
 			track.Author,
 		)
 
@@ -31,7 +33,7 @@ func OnTrackStart(r ReplyHandler) func(disgolink.Player, lavalink.TrackStartEven
 	}
 }
 
-func OnTrackEnd(queueManager queue.QueueManager, rcdr recommender.Recommender, cmdHandler CommandHandler) func(disgolink.Player, lavalink.TrackEndEvent) {
+func OnTrackEnd(logger *slog.Logger, queueManager queue.QueueManager, rcdr recommender.Recommender, cmdHandler CommandHandler) func(disgolink.Player, lavalink.TrackEndEvent) {
 	return func(player disgolink.Player, e lavalink.TrackEndEvent) {
 		if !e.Reason.MayStartNext() {
 			return
@@ -40,14 +42,23 @@ func OnTrackEnd(queueManager queue.QueueManager, rcdr recommender.Recommender, c
 		queue := queueManager.Get(e.GuildID())
 
 		if queue.Len() <= 0 {
-
 			var data TrackRequestData
-			if err := e.Track.UserData.Unmarshal(&data); err == nil {
-				// TODO: log error here
+			if err := e.Track.UserData.Unmarshal(&data); err != nil {
+				logger.Warn("failed to unmarshal track user data, skipping recommendation", "error", err)
+				return
+			}
+			if data.User == nil {
+				logger.Warn("track has no requester, skipping recommendation")
+				return
 			}
 
 			track := e.Track.Info
 			next := rcdr.GetSimilarTrack(track.Title, track.Author)
+			if next == "" {
+				logger.Warn("recommender returned no track, stopping playback")
+				return
+			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
@@ -68,9 +79,8 @@ func buildNowPlayingEmbed(
 	trackURL string,
 	artist string,
 ) discord.Embed {
-	return discord.NewEmbedBuilder().
-		SetTitle("").
-		SetColor(0x00ADD8).
-		SetDescriptionf("▶️ **Now Playing [%s - %s](%s)**", trackTitle, artist, trackURL).
-		Build()
+	return discord.NewEmbed().
+		WithTitle("").
+		WithColor(0x00ADD8).
+		WithDescriptionf("▶️ **Now Playing [%s - %s](%s)**", trackTitle, artist, trackURL)
 }

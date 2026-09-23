@@ -3,10 +3,10 @@ package recommender
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -19,13 +19,8 @@ type LastFMClient struct {
 }
 
 func NewLastFM() *LastFMClient {
-	apiKey, ok := os.LookupEnv("LAST_FM_KEY")
-	if !ok {
-		log.Fatal("Missing LAST_FM_KEY")
-	}
-
 	return &LastFMClient{
-		apiKey: apiKey,
+		apiKey: os.Getenv("LAST_FM_KEY"),
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -46,9 +41,9 @@ type SimilarTrack struct {
 type similarResponse struct {
 	SimilarTracks struct {
 		Track []struct {
-			Name   string  `json:"name"`
-			MBID   string  `json:"mbid"`
-			Match  float64 `json:"match"`
+			Name   string `json:"name"`
+			MBID   string `json:"mbid"`
+			Match  string `json:"match"`
 			Artist struct {
 				Name string `json:"name"`
 			} `json:"artist"`
@@ -59,6 +54,10 @@ type similarResponse struct {
 }
 
 func (c *LastFMClient) GetSimilar(title, artist string, limit int) ([]SimilarTrack, error) {
+	if c.apiKey == "" {
+		return nil, fmt.Errorf("lastfm: missing LAST_FM_KEY")
+	}
+
 	params := url.Values{}
 	params.Set("method", "track.getsimilar")
 	params.Set("artist", artist)
@@ -87,7 +86,11 @@ func (c *LastFMClient) GetSimilar(title, artist string, limit int) ([]SimilarTra
 		st.Artist = t.Artist.Name
 
 		// parse match score — Last.fm returns it as a string like "0.892731"
-		st.Match = t.Match
+		match, err := strconv.ParseFloat(t.Match, 64)
+		if err != nil {
+			match = 0
+		}
+		st.Match = match
 
 		results = append(results, st)
 	}

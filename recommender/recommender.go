@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -17,6 +15,8 @@ import (
 	"sync"
 	"time"
 )
+
+var defaultHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 type Recommender interface {
 	GetSimilarTrack(title, author string) string
@@ -36,6 +36,9 @@ type titleMapStruct struct {
 
 func NewReccomender(logger *slog.Logger) Recommender {
 	lastFM := NewLastFM()
+	if lastFM.apiKey == "" {
+		logger.Warn("LAST_FM_KEY not set, similar-track recommendations will be unavailable")
+	}
 
 	return &reccomndr{
 		logger:   logger,
@@ -45,7 +48,7 @@ func NewReccomender(logger *slog.Logger) Recommender {
 }
 
 func (r *reccomndr) GetSimilarTrack(title, author string) string {
-	sessionSpotifyID, err := getSpotifyID(fmt.Sprintf("track:%v artist:%v", title, author))
+	sessionSpotifyID, err := getSpotifyID(title)
 	if err != nil {
 		r.logger.Error("failed to resolve spotify id", "error", err)
 		return ""
@@ -53,57 +56,73 @@ func (r *reccomndr) GetSimilarTrack(title, author string) string {
 
 	sessionTrackRBID, err := getReccoBeatsID(sessionSpotifyID)
 	if err != nil {
-		r.logger.Error("failed to fetch similar track", "error", err)
+		r.logger.Error("failed to resolve reccobeats id", "error", err)
+		return ""
+	}
+	if sessionTrackRBID == "" {
+		r.logger.Error("seed track not found on reccobeats", "spotify_id", sessionSpotifyID)
+		return ""
 	}
 
 	// get candidates
 	candidates, err := r.lastFM.GetSimilar(title, author, 10)
 	if err != nil {
-		r.logger.Error("failed to fetch similar track", "error", err)
+		r.logger.Error("failed to fetch similar tracks from lastfm", "error", err)
 		return ""
 	}
 
-	ids := []string{}
+	ids := make([]string, 0, len(candidates)+1)
 	idMu := sync.Mutex{}
 	wg := sync.WaitGroup{}
 	for _, t := range candidates {
 		wg.Go(func() {
-			id, err := getSpotifyID(fmt.Sprintf("track:%v artist:%v", t.Name, t.Artist))
+			spotifyID, err := getSpotifyID(fmt.Sprintf("track:%v artist:%v", t.Name, t.Artist))
 			if err != nil {
-				r.logger.Error("failed to resolve spotify id", "error", err)
+				r.logger.Warn("failed to resolve candidate spotify id", "track", t.Name, "artist", t.Artist, "error", err)
+				return
+			}
+
+			rbID, err := getReccoBeatsID(spotifyID)
+			if err != nil {
+				r.logger.Warn("failed to resolve candidate reccobeats id", "track", t.Name, "artist", t.Artist, "error", err)
+				return
+			}
+			if rbID == "" {
 				return
 			}
 
 			idMu.Lock()
-			defer idMu.Unlock()
-			ids = append(ids, id)
+			ids = append(ids, rbID)
+			idMu.Unlock()
 		})
 	}
 
 	wg.Wait()
 
+	ids = append(ids, sessionTrackRBID)
+
 	ri, err := getMultipleTracksInfo(strings.Join(ids, ","))
 	if err != nil {
-		r.logger.Error("failed to fetch infods", "error", err)
+		r.logger.Error("failed to fetch track info", "error", err)
 		return ""
 	}
 
 	titleMap := map[string]titleMapStruct{}
 
 	for _, t := range ri {
-		s := titleMapStruct{}
-		s.title = t.TrackTitle
-		s.artist = t.Artists[0].Name
-		s.concat = fmt.Sprintf("%v - %v", t.TrackTitle, t.Artists[0].Name)
-		titleMap[t.ID] = s
-
+		if len(t.Artists) == 0 {
+			continue
+		}
+		titleMap[t.ID] = titleMapStruct{
+			title:  t.TrackTitle,
+			artist: t.Artists[0].Name,
+			concat: fmt.Sprintf("%v - %v", t.TrackTitle, t.Artists[0].Name),
+		}
 	}
-
-	ids = append(ids, sessionSpotifyID)
 
 	features, err := getReccoBeatsMultiFeatures(strings.Join(ids, ","))
 	if err != nil {
-		r.logger.Error("failed to fetch features", "error", err)
+		r.logger.Error("failed to fetch audio features", "error", err)
 		return ""
 	}
 
@@ -111,10 +130,15 @@ func (r *reccomndr) GetSimilarTrack(title, author string) string {
 	pool := make([]Track, 0, len(features))
 
 	for _, t := range features {
+		meta, ok := titleMap[t.ID]
+		if !ok {
+			continue
+		}
+
 		track := Track{
 			ID:          t.ID,
-			TrackTitle:  titleMap[t.ID].title,
-			TrackArtist: titleMap[t.ID].artist,
+			TrackTitle:  meta.title,
+			TrackArtist: meta.artist,
 			Features: FeatureVector{
 				t.Valence, t.Energy, t.Accousticness, t.Danceability,
 				t.Instrumentalness, t.Liveness, t.Speechiness,
@@ -162,14 +186,27 @@ func clamp01(x float64) float64 {
 	return x
 }
 
+var (
+	tokenMu      sync.Mutex
+	cachedToken  string
+	tokenExpires time.Time
+)
+
 func getAccessToken() (string, error) {
+	tokenMu.Lock()
+	defer tokenMu.Unlock()
+
+	if cachedToken != "" && time.Now().Before(tokenExpires.Add(-60*time.Second)) {
+		return cachedToken, nil
+	}
+
 	clientID, ok := os.LookupEnv("SPOTIFY_CLIENT_ID")
 	if !ok {
-		return "", errors.New("missing SPOTIFY_CLIENT_ID env vars")
+		return "", errors.New("missing SPOTIFY_CLIENT_ID env variable")
 	}
 	clientSecret, ok := os.LookupEnv("SPOTIFY_CLIENT_SECRET")
 	if !ok {
-		return "", errors.New("missing SPOTIFY_CLIENT_ID env vars")
+		return "", errors.New("missing SPOTIFY_CLIENT_SECRET env variable")
 	}
 
 	data := url.Values{}
@@ -184,54 +221,78 @@ func getAccessToken() (string, error) {
 	req.Header.Set("Authorization", "Basic "+auth)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("spotify token request failed with status %d", resp.StatusCode)
+	}
 
-	var result map[string]any
-	json.Unmarshal(body, &result)
+	var result struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("spotify token JSON decode error: %w", err)
+	}
 
-	token := result["access_token"].(string)
+	if result.AccessToken == "" {
+		return "", errors.New("spotify token response missing access_token")
+	}
 
-	return token, nil
+	expiresIn := time.Duration(result.ExpiresIn) * time.Second
+	if expiresIn <= 0 {
+		expiresIn = time.Hour
+	}
+
+	cachedToken = result.AccessToken
+	tokenExpires = time.Now().Add(expiresIn)
+
+	return cachedToken, nil
 }
 
 func getSpotifyID(title string) (string, error) {
 	token, err := getAccessToken()
 	if err != nil {
-		log.Fatal(err)
+		return "", err
 	}
 
 	query := url.QueryEscape(title)
 	endpoint := fmt.Sprintf("https://api.spotify.com/v1/search?q=%s&type=track&limit=1", query)
 
-	req, _ := http.NewRequest("GET", endpoint, nil)
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return "", err
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
-	var result map[string]any
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("spotify search failed with status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Tracks struct {
+			Items []struct {
+				ID string `json:"id"`
+			} `json:"items"`
+		} `json:"tracks"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("reccobeats get id:: JSON decode error: %w", err)
+		return "", fmt.Errorf("spotify search JSON decode error: %w", err)
 	}
 
-	tracks := result["tracks"].(map[string]any)
-	items := tracks["items"].([]any)
-
-	if len(items) == 0 {
-		return "", fmt.Errorf("no track found")
+	if len(result.Tracks.Items) == 0 {
+		return "", fmt.Errorf("no track found for %q", title)
 	}
 
-	first := items[0].(map[string]any)
-	return first["id"].(string), nil
+	return result.Tracks.Items[0].ID, nil
 }

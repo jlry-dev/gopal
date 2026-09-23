@@ -2,7 +2,7 @@ package config
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"os"
 	"time"
 
@@ -15,37 +15,32 @@ type DisgoLink struct {
 	disgolink.Client
 }
 
-func Connect(botID snowflake.ID) *DisgoLink {
+func Connect(botID snowflake.ID) (*DisgoLink, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	client := disgolink.New(botID)
 	lavalinkAddr, ok := os.LookupEnv("LAVALINK_ADDR")
 	if !ok {
-		log.Fatal("missing LAVALINK_ADDR env variable")
+		return nil, fmt.Errorf("missing LAVALINK_ADDR env variable")
 	}
 
 	lavalinkPasswd, ok := os.LookupEnv("LAVALINK_PASSWORD")
 	if !ok {
-		log.Fatal("missing LAVALINK_PASSWORD env variable")
+		return nil, fmt.Errorf("missing LAVALINK_PASSWORD env variable")
 	}
 
-	_, err := client.AddNode(ctx, disgolink.NodeConfig{
+	if _, err := client.AddNode(ctx, disgolink.NodeConfig{
 		Name:      "GoPal Lavalink Node",
 		Address:   lavalinkAddr,
 		Password:  lavalinkPasswd,
 		Secure:    false,
 		SessionID: "",
-	})
-	if err != nil {
-		log.Println("failed to add lavalink node")
+	}); err != nil {
+		return nil, fmt.Errorf("failed to add lavalink node: %w", err)
 	}
 
-	dl := DisgoLink{
-		Client: client,
-	}
-
-	return &dl
+	return &DisgoLink{Client: client}, nil
 }
 
 func (d *DisgoLink) OnVoiceStateUpdateHandler(event *events.GuildVoiceStateUpdate) {

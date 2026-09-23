@@ -74,7 +74,11 @@ func (b *gopal) Run() {
 		panic(err)
 	}
 
-	dl := config.Connect(client.ApplicationID)
+	dl, err := config.Connect(client.ApplicationID)
+	if err != nil {
+		b.logger.Error("failed to connect to lavalink", slog.String("error", err.Error()))
+		os.Exit(-1)
+	}
 
 	replyer := handlers.NewReplyer(b.logger, client)
 	queueManager := queue.NewQueueManager()
@@ -94,8 +98,8 @@ func (b *gopal) Run() {
 	)
 
 	dl.AddListeners(
-		disgolink.NewListenerFunc(handlers.OnTrackStart(replyer)),
-		disgolink.NewListenerFunc(handlers.OnTrackEnd(queueManager, reccomndr, cmdHandler)),
+		disgolink.NewListenerFunc(handlers.OnTrackStart(b.logger, replyer)),
+		disgolink.NewListenerFunc(handlers.OnTrackEnd(b.logger, queueManager, reccomndr, cmdHandler)),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -123,6 +127,11 @@ func (b *gopal) onMessageCreate(e *events.MessageCreate) {
 
 	// Return when bot is the same
 	if bot.ID() == user.ID {
+		return
+	}
+
+	// Voice commands are guild-only
+	if e.GuildID == nil {
 		return
 	}
 

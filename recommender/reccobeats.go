@@ -72,7 +72,7 @@ type SimilarResponse struct {
 func getReccoBeatsID(trackID string) (string, error) {
 	apiURL := fmt.Sprintf("https://api.reccobeats.com/v1/track?ids=%v", url.QueryEscape(trackID))
 
-	res, err := http.Get(apiURL)
+	res, err := defaultHTTPClient.Get(apiURL)
 	if err != nil {
 		return "", fmt.Errorf("reccobeats get id: request failed: %w", err)
 	}
@@ -99,7 +99,7 @@ func getMultipleTracksInfo(ids string) ([]TrackInfo, error) {
 	params := url.Values{}
 	params.Set("ids", ids)
 
-	res, err := http.Get(baseURL + "?" + params.Encode())
+	res, err := defaultHTTPClient.Get(baseURL + "?" + params.Encode())
 	if err != nil {
 		return nil, fmt.Errorf("reccobeats get multiple track info: request failed: %w", err)
 	}
@@ -126,7 +126,7 @@ func getReccoBeatsMultiFeatures(ids string) ([]AudioFeatures, error) {
 	params := url.Values{}
 	params.Set("ids", ids)
 
-	res, err := http.Get(baseURL + "?" + params.Encode())
+	res, err := defaultHTTPClient.Get(baseURL + "?" + params.Encode())
 	if err != nil {
 		return nil, fmt.Errorf("reccobeats get multiple features: request failed: %w", err)
 	}
