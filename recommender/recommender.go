@@ -48,7 +48,7 @@ func NewReccomender(logger *slog.Logger) Recommender {
 }
 
 func (r *reccomndr) GetSimilarTrack(title, author string) string {
-	sessionSpotifyID, err := getSpotifyID(title)
+	sessionSpotifyID, err := getSpotifyID(fmt.Sprintf("track:%v artist:%v", title, author))
 	if err != nil {
 		r.logger.Error("failed to resolve spotify id", "error", err)
 		return ""

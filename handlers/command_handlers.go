@@ -98,7 +98,7 @@ func (h *cmdHandlr) Play(e *EventDTO) {
 			return
 		}
 
-		query := fmt.Sprintf("scsearch:%v", identifier)
+		query := fmt.Sprintf("ytmsearch:%v", identifier)
 		h.LoadAndPlay(ctx, query, user, e.ChannelID, e.GuildID)
 
 	} else {
@@ -111,7 +111,7 @@ func (h *cmdHandlr) Play(e *EventDTO) {
 			h.logger.Error("failed to join voice channel", slog.String("ERROR", err.Error()))
 		}
 
-		query := fmt.Sprintf("scsearch:%v", identifier)
+		query := fmt.Sprintf("ytmsearch:%v", identifier)
 
 		h.LoadAndPlay(ctx, query, user, e.ChannelID, e.GuildID)
 	}

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"time"
 )
 
@@ -43,7 +42,7 @@ type similarResponse struct {
 		Track []struct {
 			Name   string `json:"name"`
 			MBID   string `json:"mbid"`
-			Match  string `json:"match"`
+			Match  float64 `json:"match"`
 			Artist struct {
 				Name string `json:"name"`
 			} `json:"artist"`
@@ -85,12 +84,7 @@ func (c *LastFMClient) GetSimilar(title, artist string, limit int) ([]SimilarTra
 		// artist is an array in the response but always has exactly one entry
 		st.Artist = t.Artist.Name
 
-		// parse match score — Last.fm returns it as a string like "0.892731"
-		match, err := strconv.ParseFloat(t.Match, 64)
-		if err != nil {
-			match = 0
-		}
-		st.Match = match
+		st.Match = t.Match
 
 		results = append(results, st)
 	}
