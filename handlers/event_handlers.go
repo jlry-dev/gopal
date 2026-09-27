@@ -53,7 +53,7 @@ func OnTrackEnd(logger *slog.Logger, queueManager queue.QueueManager, rcdr recom
 			}
 
 			track := e.Track.Info
-			next := rcdr.GetSimilarTrack(track.Title, track.Author)
+			next := rcdr.GetSimilarTrack(e.GuildID().String(), track.Title, track.Author)
 			if next == "" {
 				logger.Warn("recommender returned no track, stopping playback")
 				return

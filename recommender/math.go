@@ -249,37 +249,3 @@ func Score(candidate FeatureVector, state *SessionState, recentlyPlayed []Featur
 		Combined:   combined,
 	}
 }
-
-// RankCandidates scores every candidate and returns them sorted by
-// combined score, descending. Ties are broken by input order (stable sort).
-func RankCandidates(candidates []FeatureVector, state *SessionState, recentlyPlayed []FeatureVector, params ScoreParams) []ScoredCandidate {
-	scored := make([]ScoredCandidate, len(candidates))
-	for i, c := range candidates {
-		scored[i] = ScoredCandidate{
-			Track: c,
-			Score: Score(c, state, recentlyPlayed, params),
-		}
-	}
-	sortByScoreDesc(scored)
-	return scored
-}
-
-// ScoredCandidate pairs a candidate's features with its score breakdown.
-type ScoredCandidate struct {
-	Track FeatureVector
-	Score ScoreBreakdown
-}
-
-// sortByScoreDesc sorts in place by Score.Combined, descending, using a
-// stable insertion sort — candidate pools in this domain are small
-// (tens of tracks), so this avoids pulling in "sort" just for stability
-// guarantees you'd otherwise have to re-derive with sort.Slice + index tiebreak.
-func sortByScoreDesc(s []ScoredCandidate) {
-	for i := 1; i < len(s); i++ {
-		j := i
-		for j > 0 && s[j-1].Score.Combined < s[j].Score.Combined {
-			s[j-1], s[j] = s[j], s[j-1]
-			j--
-		}
-	}
-}

@@ -19,13 +19,23 @@ import (
 var defaultHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 type Recommender interface {
-	GetSimilarTrack(title, author string) string
+	GetSimilarTrack(guildID string, title, author string) string
+}
+
+// recommenderSession is the per-guild session memory: the drifting "vibe"
+// and the window of recently played tracks used for novelty scoring and
+// for excluding repeats from future pools.
+type recommenderSession struct {
+	state  *SessionState
+	recent *RecentWindow
 }
 
 type reccomndr struct {
 	logger   *slog.Logger
 	selector *Selector
 	lastFM   *LastFMClient
+	mu       sync.Mutex
+	sessions map[string]*recommenderSession
 }
 
 type titleMapStruct struct {
@@ -44,10 +54,11 @@ func NewReccomender(logger *slog.Logger) Recommender {
 		logger:   logger,
 		selector: DefaultSelector(rand.New(rand.NewSource(time.Now().UnixNano()))),
 		lastFM:   lastFM,
+		sessions: make(map[string]*recommenderSession),
 	}
 }
 
-func (r *reccomndr) GetSimilarTrack(title, author string) string {
+func (r *reccomndr) GetSimilarTrack(guildID, title, author string) string {
 	sessionSpotifyID, err := getSpotifyID(fmt.Sprintf("track:%v artist:%v", title, author))
 	if err != nil {
 		r.logger.Error("failed to resolve spotify id", "error", err)
@@ -163,17 +174,64 @@ func (r *reccomndr) GetSimilarTrack(title, author string) string {
 		return ""
 	}
 
-	state := NewSessionState(len(seed.Features))
-	state.Update(seed.Features, 0.25)
+	sess := r.getSession(guildID, len(seed.Features))
 
-	ranked := RankTracks(pool, state, nil, DefaultScoreParams())
-	chosen, err := r.selector.Select(ranked, state)
+	// The just-finished seed is part of the session history: fold it into
+	// the vibe and the recent window so repeats get excluded and novelty
+	// has something to compare against.
+	sess.state.Update(seed.Features, 0.25)
+	sess.recent.Add(seed)
+
+	excluded := sess.recent.IDs()
+	pool = filterPool(pool, excluded, 3)
+
+	if len(pool) == 0 {
+		r.logger.Warn("no candidates left after excluding recent plays")
+		return ""
+	}
+
+	ranked := RankTracks(pool, sess.state, sess.recent.Features(), DefaultScoreParams())
+	chosen, err := r.selector.Select(ranked, sess.state)
 	if err != nil {
 		r.logger.Error("selection failed", "error", err)
 		return ""
 	}
 
 	return fmt.Sprintf("%v - %v", chosen.TrackTitle, chosen.TrackArtist)
+}
+
+// getSession returns the per-guild session state, creating it lazily.
+func (r *reccomndr) getSession(guildID string, dim int) *recommenderSession {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	sess, ok := r.sessions[guildID]
+	if !ok {
+		sess = &recommenderSession{
+			state:  NewSessionState(dim),
+			recent: NewRecentWindow(15),
+		}
+		r.sessions[guildID] = sess
+	}
+	return sess
+}
+
+// filterPool drops any recently played track IDs and enforces a per-artist
+// cap so one artist can't flood the candidate pool.
+func filterPool(pool []Track, excluded map[string]bool, maxPerArtist int) []Track {
+	filtered := make([]Track, 0, len(pool))
+	artistCounts := make(map[string]int)
+	for _, t := range pool {
+		if excluded[t.ID] {
+			continue
+		}
+		if artistCounts[t.TrackArtist] >= maxPerArtist {
+			continue
+		}
+		filtered = append(filtered, t)
+		artistCounts[t.TrackArtist]++
+	}
+	return filtered
 }
 
 func clamp01(x float64) float64 {
