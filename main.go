@@ -10,11 +10,8 @@ import (
 )
 
 func main() {
-	if env := os.Getenv("APP_ENV"); env != "production" {
-		err := godotenv.Load()
-		if err != nil {
-			log.Fatalf("failed to load env: %v", err)
-		}
+	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+			log.Fatalf("Critical error reading .env configuration: %v", err)
 	}
 
 	wd, err := os.Getwd()
